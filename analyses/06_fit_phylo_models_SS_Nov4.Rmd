@@ -1,8 +1,8 @@
 ---
 title: "Determinants of helminth activation energy (Sharpe-Schoolfield)"
 author: "Dan Benesh"
-date: "October 24, 2019"
-output: html_document
+date: "November 4, 2019"
+output: github_document
 ---
 
 The purpose of this notebook is to explore and model the activation energies for helminth development. I specifically use activation energies fit with the **Sharpe-Schoolfield** model.
@@ -20,9 +20,9 @@ theme_set(new = theme_bw())
 ```
 
 ```{r importdata}
-ae <- read.csv(file = "SS_Arr_FitResults_Aug-30.csv", header = TRUE)
-dat <- read.csv(file = "Helminth data plant + animal global temps Sept8 2019.csv", header = TRUE)
-tree <- read.tree(file = "full_tree_time_calib.nex")
+ae <- read.csv(file = "../data/SS_Arr_FitResults_1910.csv", header = TRUE)
+dat <- read.csv(file = "../data/Helminth data plant + animal global temps Sept8 2019.csv", header = TRUE)
+tree <- read.tree(file = "../data/full_tree_time_calib.nex")
 ```
 ```{r}
 dat <- select(dat, tpc_num, Genus, Species, Family, Order, Class, Phylum, 
@@ -60,38 +60,22 @@ length(unique(dat$binomial))
 
 So there are a fair number of species with multiple curves.
 
-### Match names in the data and in the tree
-
-Which species are in the data but not in the tree?
-
 ```{r}
-dat$binomial[!dat$binomial %in% tree$tip.label]
+# dat$binomial[!dat$binomial %in% tree$tip.label]
 ```
-
-Some of these are spelling mistakes or synonymizations. Fix them in main dataset.
-
 ```{r}
 dat$binomial[which(dat$binomial == "Protostrongylus _stilesi/rushi (spp.)")] <- "Protostrongylus_stilesi" # this species has sequences avail and is in 'mega tree'
 dat$binomial[which(dat$binomial == "Dochmoides_stenocephala")] <- "Uncinaria_stenocephala" # synonym
 dat$binomial[which(dat$binomial == "Dioctophyma_renale")] <- "Dioctophyme_renale" # misspelling
 dat$binomial[which(dat$binomial == "Ostertagia_circumcincta")] <- "Teladorsagia_circumcincta" # this species has sequences avail and is in 'mega tree'
 ```
-
-After fixing these mistakes none are missing.
-
 ```{r}
 # dat$binomial[!dat$binomial %in% tree$tip.label]
 ```
-
-Any tips in tree that are not in the data?
-
 ```{r}
 spp_not_in_dat <- tree$tip.label[!tree$tip.label %in% dat$binomial]
-spp_not_in_dat
+# spp_not_in_dat
 ```
-
-There are quite a few. I suppose these deal with survival instead of development. Let's remove them from the tree.
-
 ```{r}
 tree_red <- drop.tip(tree, spp_not_in_dat)
 ```
@@ -109,6 +93,50 @@ The median activation energy was `r round(median(dat$E_SS), 2)`.
 ```{r}
 # median(dat$E_SS)
 ```
+
+How confident are we in each activation energy estimate? For this, we look at the distribution of standard error estimates for the activation energies. Most are small, but there is an outlier.
+
+```{r}
+ggplot(dat, aes(x = stderr_ss)) +
+  geom_histogram()
+```
+
+All else equal, we should have more confidence in curves fit with a larger number of temperatures. To reflect this, standard error should decrease with sample size (i.e. number of temperatures). But this is not obvious when we plot standard error as a function of temperatures.
+
+```{r}
+ggplot(dat, aes(x = num_temps, y = stderr_ss)) +
+  geom_point(alpha = 0.5) + geom_smooth() 
+```
+
+When we zoom in to exclude the outlier, there is still not a clear relationship between standard error and the number of temperatures. However, the largest standard errors are observed with the lowest sample sizes (left-hand part of plot), which is reassuring.
+
+```{r}
+ggplot(dat, aes(x = num_temps, y = stderr_ss)) +
+  geom_point(alpha = 0.5) + 
+  geom_smooth() +
+  # geom_smooth(method = 'lm', se = F, linetype = 'dotted') +
+  coord_cartesian(ylim = c(0, 0.5))
+```
+
+With less precision (higher standard errors), we would expect a broader distribution of activation energy estimates. Let's look at the distribution of activation energies split by whether standard error was high or low (above or below the median SE). Surprisingly, the estimates with high standard errors do not have a wider distribution, opposite to expectations.
+
+```{r}
+dat <- mutate(dat, se_cat = if_else(stderr_ss > median(stderr_ss, na.rm = T), "high standard error", "low standard error"))
+```
+```{r}
+ggplot(dat, aes(x = E_SS)) + 
+  geom_histogram() +
+  facet_wrap(~se_cat, nrow = 2)
+```
+
+The median of the distribution also seems to vary with standard error; high standard error is associated with higher activation energy.
+
+```{r}
+group_by(dat, se_cat)%>%
+  summarize(median_AE = median(E_SS))
+```
+
+Thus, when we weight the data points by the standard error of the activation energies, it should shift the overall mean down.
 
 How many AE estimates per species?
 
@@ -141,28 +169,30 @@ facet_plot(p, panel = 'Activation Energy',
 
 ```
 
-The bars on the right are the estimated activation energies. Some clades appear to have consistently higher or lower values, which suggests there is phylogenetic signal in activation energy estimates.
+The bars on the right are the estimated activation energies. Maybe some clades at the top (nematodes) have higher values than those at the bottom (flatworms), but it is not conspicuous. I don't think that is super surprising, because I assume AE is a parameter that is subject to a fair amount of measurement error.
 
 # Phylogenetic mixed models
 
-I'll fit phylogenetic mixed models (see [here](https://onlinelibrary.wiley.com/doi/full/10.1111/j.1420-9101.2009.01915.x) for an overview of these models) using the `MCMCglmm` library. These are not simple models, but the Bayesian `MCMCglmm` package does allow us to fit both within- and between-species effects in the same model.
+I'll fit phylogenetic mixed models (see [here](https://onlinelibrary.wiley.com/doi/full/10.1111/j.1420-9101.2009.01915.x) for an overview of these models) using the `MCMCglmm` library. These are not simple models, but the Bayesian `MCMCglmm` package does allow us to fit both within- and between-species effects in the same model. It also allows us to weight the activation energies by their standard errors.
 
-Before diving into the models, though, let's outline a model-building strategy. This is my typical approach. First, I fit a 'base' model with the tangential variables. Here, I would include phylogeny and within-species variation. I would also like to include any measures of curve 'confidence', such as the number of data points used in the curve or a goodness of fit measure (R^2^?).  For now, I used the number of temp points studied, but the standard error of the AE might be better, as it incorporates but variance and sample size. Second, I add biologically interesting variables to this base model. Here, I would categorize interesting variables into two groups: (1) characteristics of the external environment (like latitude, aquatic vs terrestrial, etc.) and (2) characteristics of the parasite (e.g. in or out of host, body size, stage in the life cycle, etc.). With this as a plan, let's get modelling.
+Before diving into the models, though, let's outline a model-building strategy. First, I fit a 'base' model with the tangential variables. Here, I would include phylogeny and within-species variation. From the outset, I weight each data point by the standard error of activation energy. This weight was incorporated into the model as suggested [here](https://ourcodingclub.github.io/2018/01/22/mcmcglmm.html) and in the `MCMCglmm` course notes. Second, I add biologically interesting variables to this base model. Here, I would categorize interesting variables into two groups: (1) characteristics of the external environment (like latitude, aquatic vs terrestrial, etc.) and (2) characteristics of the parasite (e.g. in or out of host, stage in the life cycle, etc.). With this as a plan, let's get modelling.
 
 ### Within-species effect
 
-First, I create a null model that includes a parasite species random effect, but not a phylogenetic effect. 
+First, I create a null model that includes a parasite species random effect, but not a phylogenetic effect. Throughout, data points are weighted by their standard error. 
 
 ```{r}
 library(MCMCglmm)
 ```
 ```{r}
-prior1<-list(G=list(G1=list(V=1,nu=0.02)),R=list(V=1,nu=0.02)) # uninformative prior for within species effect
+prior1<-list(G=list(G1=list(V=1,nu=0.02), # uninformative prior for within species effect
+                     G2=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit - fixed!
+              R=list(V=1,nu=0.02)) 
 ```
 
 ```{r}
 mod0 <- MCMCglmm(E_SS ~ 1, 
-                    random = ~ binomial, # w/in spp effx
+                    random = ~ binomial + idh(stderr_ss):units, # w/in spp effx
                     data = dat, prior = prior1,
                     nitt=23000, thin = 10,
                     family = "gaussian", pr=F, verbose = F)
@@ -174,14 +204,22 @@ After fitting an MCMC model, a first quality check is looking at chain mixing. E
 plot(mod0$VCV)
 ```
 
-The within-species effect, `binomial`, mixes well and is non-zero, suggesting that multiple AE measurements on the same species tend to be similar. Here's the proportion of variation attributable to the within-species effect. 
+The within-species effect, `binomial`, mixes well and is non-zero, suggesting that multiple AE measurements on the same species tend to be similar. The variance component for `std-error` is fixed at 1, such that the weights assigned do not change as the posterior distribution is sampled by the Markov chain. 
+
+The model intercept (the average activation energy) is about 1.05.
+
+```{r}
+summary(mod0)
+```
+
+Here's the proportion of variation attributable to the within-species effect. 
 
 ```{r}
 phy_h2 <- mod0$VCV[,'binomial']/(mod0$VCV[,'binomial'] + mod0$VCV[,'units'])
 median(phy_h2)
 ```
 
-It is high. On the one hand this makes sense, as many species only had a single measurement (and hence no residual value after accounting for a 'species effect'). Here's an attempt to visualize the variation in activation energy estimates for species that had multiple measurements. The species are ordered by their median activation energy. One can see that some species tend to have very similar measurements, while for other species, there is a fair amount of spread in the estimated activation energies.
+It is high. On the one hand this makes sense, as many species only had a single measurement (and hence no residual value after accounting for a 'species effect'). Here's an attempt to visualize the variation in activation energy estimates for the species that had multiple measurements. The species are ordered by their median activation energy. One can see that some species tend to have very similar measurements, while for other species, there is a fair amount of spread in the estimated activation energies.
 
 ```{r}
 mm <- group_by(dat, binomial)%>%
@@ -211,22 +249,23 @@ dat$tree_tips <- dat$binomial
 ```
 ```{r}
 prior2<-list(G=list(G1=list(V=1,nu=0.02),
-                    G2=list(V=1,nu=0.02)),
-            R=list(V=1,nu=0.02)) # uninformative prior
+                    G2=list(V=1,nu=0.02),
+                    G3=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.02)) # uninformative prior for within species effect
 ```
 
-For this model, the chain needs to be run for longer to get reasonable mixing, partly because the random effects are related. If the model estimates higher values for the within-species variance component, it estimates less for the phylogenetic component, and vice versa. 
+For this model, the chain needs to be run for longer to get reasonable mixing, partly because the two random effects are related. If the model estimates higher values for the within-species variance component, it estimates less for the phylogenetic component, and vice versa. 
 
 ```{r}
 mod1 <- MCMCglmm(E_SS ~ 1, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
                  data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-After fitting, we can again plot the chains. They look good. The within-species effect (`binomial`) is smaller than the phylogenetic effect (`tree_tips`). 
+After fitting, we can again plot the chains. They look good. The within-species effect (`binomial`) is smaller than the phylogenetic effect (`tree_tips`) and it pushes up against zero. 
 
 ```{r}
 plot(mod1$VCV)
@@ -258,89 +297,65 @@ ord_A <- group_by(dat, Order)%>%
 ggplot(mutate(dat, ord_A = factor(Order, levels = ord_A$Order)),
        aes(x = ord_A, y = E_SS, color = Phylum)) + 
   geom_boxplot(outlier.color = NA) +
-  geom_point(alpha = 0.5, position = position_jitter(width = 0.2)) + 
+  geom_point(alpha = 0.5, position = position_jitter(width = 0.2), aes(size = 1/stderr_ss)) + 
   coord_flip() +
-  theme(axis.title.y = element_blank())
+  theme(axis.title.y = element_blank()) +
+  labs(size = "Weight - 1/SE")
 rm(ord_A)
 ```
 
 
-### Number of temperature measurements used to estimate AE
+### Environmental variables
 
-Another factor to account for is curve quality. A rough proxy of this is the number of data points used for curve fitting. I would not necessarily expect AE to depend on the number of data points for curve fitting, but we should check it nonetheless. 
+Now, we move onto environmental variables of interest, though it is important to keep phylogenetic effects in mind during this modeling exercies. Essentially, any explanatory variable that is phylogenetically structured will "compete" with the phylogenetic random effect to explain variation in AE. 
+
+I have tried to find a series of logical steps to testing environmental correlates of helminth AE. First and foremost, we expect AE to be related to environmental temperature, so I start with temperature variables.
+
+#### Mean temperature
+
+There are three temperature measurements in the data: mean, max, and min for the location. I would expect the three temp variables to be tightly correlated, so let's start by just adding the mean to the model. Note that I have centered the continuous variables around their median, such that the model parameters are estimated at e.g. the data's median annual temperature.
 
 ```{r}
-ggplot(dat, aes(x = num_temps, y = E_SS)) + 
-  geom_point(alpha = 0.2) + 
-  geom_smooth(se = F) 
-  # geom_smooth(method = lm, formula = y ~ poly(x, 2), se = F, linetype = 'dashed')
+dat <- mutate(dat, mean_ann_temp_cen = mean_ann_temp - median(mean_ann_temp),
+              max_month_temp_cen = max_month_temp - median(max_month_temp),
+              min_month_temp_cen = min_month_temp - median(min_month_temp))
 ```
-The AEs estimated from the fewest numbers of data points tend to be smaller. We can try to model this by adding a quadratic term into the model. In the future, we want to account for variation in study/curve quality using a different proxy, such as AE standard error.
 
 ```{r}
-mod2 <- MCMCglmm(E_SS ~ poly(num_temps,2), 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
+mod3 <- MCMCglmm(E_SS ~ mean_ann_temp_cen, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
                  data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-The curvature term is negative and significant. 
-
-```{r}
-summary(mod2)
-```
-
-This seems like something important to 'correct' for, so let's retain it in the models.
-
-### Environmental variables
-
-Now, we move onto environmental variables of interest, though it is important to keep phylogenetic effects in mind during this modeling exercies. Essentially, any explanatory variable that is phylogenetically structured will "compete" with the phylogenetic random effect to explain variation in AE. 
-
-I have tried to find a series of logical steps to testing environmental correlates of helminth AE. First and foremost, we expect AE to be related to environmental temperature. Therefore, I start by adding mean environmental temperature to the models.
-
-#### Mean temperature
-
-There are three temperature measurements in the data: mean, max, and min for the location. I would expect the three temp variables to be tightly correlated, so let's start by just adding the mean to the model.
-
-```{r}
-mod3 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
-                 nitt=63000, thin = 50,
-                 ginverse = list(tree_tips=Ainv),
-                 family = "gaussian", pr=F, verbose = F)
-```
-
-It is negative but not significant.
+The effect of mean locale temperature is negative but not significant.
 
 ```{r}
 summary(mod3)
 ```
 
-For species living at lower temperatures, development speeds up more as temperature increases. This pattern seems clearer for data where an exact study location was given.
+For species living at lower temperatures, development speeds up more as temperature increases. It also does not look like this depends on whether an exact study location was given.
 
 ```{r}
 dat <- mutate(dat, sample_loc_avail = if_else(author_latitude == ".", 'yes, exact', 'no, author loc')) # author location?
 ```
 ```{r}
 ggplot(dat, aes(x = mean_ann_temp, y = E_SS, color = sample_loc_avail)) +
-  geom_point(alpha = 0.5) +
+  geom_point(alpha = 0.5, aes(size = 1/stderr_ss)) +
   labs(color = "exact location?") +
   geom_smooth(method = lm, se = F) 
 ```
 
 #### Temperature variation
 
-A mean temperature does not indicate the temperature range a parasite is exposed to. Thus, as the next modelling step, we'll include location min and max temps, as well as their interaction. None of these terms are significant. 
+A mean temperature does not indicate the temperature range a parasite is exposed to. Thus, as the next modelling step, we'll include location min and max temps. None of these terms are significant and the model DIC decreases, suggesting adding temperature extremes does not improve the model.
 
 ```{r}
-mod4 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + max_month_temp * min_month_temp, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod4 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + max_month_temp_cen + min_month_temp_cen, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
@@ -349,18 +364,43 @@ mod4 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + max_month_temp * min
 summary(mod4)
 ```
 
-Accordingly, when we plot AE as a function of the absolute difference between maximum and minimum locale temperatures, there is no relationship, suggesting AE is not related to temperature extremes.
+Interestingly, the parameter estimates for max and min temps are positive, which is opposite to the trend seen with mean temp. But when we plot AE as a function of max and min, we see a negative relationship just like for mean temp: low temps, high AE.
 
 ```{r}
-ggplot(dat, aes(x = max_month_temp - min_month_temp, y = E_SS)) +
-  geom_point(alpha = 0.5) +
-  labs(color = "exact location?") +
-  geom_smooth( se = F)
+ggplot(dat, aes(x = max_month_temp, y = E_SS, color = sample_loc_avail)) +
+  geom_point(alpha = 0.5, aes(size = 1/stderr_ss )) +
+  labs(color = "exact location?", size = "Weight") +
+  geom_smooth(method = lm, se = F)
+```
+
+```{r}
+ggplot(dat, aes(x = min_month_temp, y = E_SS, color = sample_loc_avail)) +
+  geom_point(alpha = 0.5, aes(size = 1/stderr_ss )) +
+  labs(color = "exact location?", size = "Weight") +
+  geom_smooth(method = lm, se = F)
+```
+
+This is suggestive that, once controlling for mean temp, activation energies increase with higher max and min temps. However, as neither min nor max seems to explain additional variation in activation energy, we won't consider these temperature extremes further.
+
+```{r}
+preds <- predict(mod3) # predicted values with just mean temp
+```
+```{r}
+# ggplot(dat, aes(x = max_month_temp, y = preds - E_SS, color = sample_loc_avail)) +
+#   geom_point(alpha = 0.5, aes(size = 1/stderr_ss )) +
+#   labs(color = "exact location?", size = "Weight", y = "Residual, mean temp only") +
+#   geom_smooth(method = lm, se = F) 
+```
+```{r}
+# ggplot(dat, aes(x = min_month_temp, y = preds - E_SS, color = sample_loc_avail)) +
+#   geom_point(alpha = 0.5, aes(size = 1/stderr_ss )) +
+#   labs(color = "exact location?", size = "Weight", y = "Residual, mean temp only") +
+#   geom_smooth(method = lm, se = F) 
 ```
 
 #### Seasonality
 
-Variation in temperature is one component of seasonality, but not the only one. Season length, photoperiod, rainfall, etc. may all vary with seasons and perhaps impact the thermal-dependence of parasite development. The dataset contains two variables that might capture variation in seasonality: latitude and distribution. Distribution zones were defined as 'tropics', 'temperate', 'polar', etc., which means this variable overlaps substantially with latitude. Consequently, I examine these two variables in parallel (i.e. I won't put both in the same model). 
+Variation in temperature is one component of seasonality, but not the only one. Season length, photoperiod, rainfall, etc. may all vary with seasons and perhaps impact the thermal-dependence of parasite development. The dataset contains two variables that might capture seasonality: latitude and distribution. Distribution zones were defined as 'tropics', 'temperate', 'polar', etc., which means this variable overlaps substantially with latitude. Consequently, I examine these two variables in parallel (i.e. I won't put both in the same model). 
 
 ##### Latitude
 
@@ -371,29 +411,39 @@ dat <- mutate(dat, lat_abs = if_else(latitude == ".", abs(as.integer(author_lati
 ```
 
 ```{r}
-mod5 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + lat_abs, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod5 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + lat_abs, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-There is not a significant relationship between AE and latitude.
+There is not a clear relationship between AE and latitude.
 
 ```{r}
 summary(mod5)
 ```
 
-When we plot it, we see that activation energies tend to increase with latitude, and this does not appear to depend on whether exact locations were given or not.
+Surprisingly, the parameter estimate for latitude is negative, but when we plot it, we see that activation energies tend to increase with latitude.
 
 ```{r}
 ggplot(dat, aes(x = lat_abs, y = E_SS, color = sample_loc_avail)) + 
-  geom_point(alpha = 0.5) + 
+  geom_point(alpha = 0.5, aes(size = 1/stderr_ss )) +
   geom_smooth(method = lm, se = F) +
-  labs(x = 'latitude', color = "exact location?") 
+  labs(x = 'latitude', color = "exact location?",size = "Weight") 
 ```
+
+This suggests that, like for `min` and `max` temperature, correlations among variables (here between mean temp and latitude) might cause counterintuitive or spurious results. When we remove the effect of mean temperature on activation energy (i.e. we take the residuals of the model with just mean temp), and then plot the residual variation as a function of latitude, we see essentially no relationship between latitude and activation energy.
+
+```{r}
+ggplot(dat, aes(x = lat_abs, y = preds - E_SS, color = sample_loc_avail)) + 
+  geom_point(alpha = 0.5, aes(size = 1/stderr_ss )) +
+  geom_smooth(method = lm, se = F) +
+  labs(x = 'latitude', color = "exact location?", y = "Residuals, mean temp only model", size = "Weight") 
+```
+
+Let's look at the next variable, which is related to latitude.
 
 ##### Climate zones
 
@@ -421,50 +471,48 @@ ggplot(dat, aes( x = dist_zone, y = lat_abs)) +
   labs(x = NULL, y = 'Latitude')
 ```
 
-Nonetheless, let's add this variable to the model.
+Nonetheless, let's add this variable to the model instead of latitude.
 
 ```{r}
-mod6 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod6 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + dist_zone, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-Some of the contrasts among these categories are borderline significant.
+Several contrasts among these categories are marginally significant and the model DIC decreases.
 
 ```{r}
 summary(mod6)
 ```
 
-Consistent with the pattern for latitude, polar species tend to have higher AE. However, other contrasts are not clearly related to latitude, such tropical species having higher AE than temperate ones. 
+Consistent with the pattern for temperature and latitude, polar species tend to have higher AE. But weirdly, a non-linear relationship with latitude seems to emerge, with AE peaking in polar habitats, decreasing in temperate habitats, and then increasing again toward the equator.  
 
 ```{r}
 ggplot(dat, aes( x = dist_zone, y = E_SS)) +
   geom_boxplot(outlier.colour = NA) +
-  geom_point(alpha = 0.5, position = position_jitter(width = 0.2)) +
-  labs(x = NULL, y = 'Activation energy')
+  geom_point(alpha = 0.5, position = position_jitter(width = 0.2), aes(size = 1/stderr_ss)) +
+  labs(x = NULL, y = 'Activation energy', size = "Weight")
 ```
 
-Latitude and distribution overlap, but which explains AE better? We can compare the models with latitude vs distribution zone using information criteria. Here is the progression of model fits thus far (low DIC, better model):
+Latitude and distribution overlap and presumably explain the same variation in AE, but which explains it better? We can compare the models with latitude vs distribution zone using information criteria. Here is the progression of model fits thus far (low DIC, better model):
 
 ```{r}
 print(paste0("DIC for model with phylogeny: ", round(mod1$DIC, 1)))
-print(paste0("DIC for model with number of temperatures in curve: ", round(mod2$DIC, 1)))
 print(paste0("DIC for model with just mean temp: ", round(mod3$DIC, 1)))
 print(paste0("DIC for model with latitude: ", round(mod5$DIC, 1)))
 print(paste0("DIC for model with distribution zone: ", round(mod6$DIC, 1)))
 ```
 
-According to this measure, the model with  distribution is better than the one with latitude. One explanation for this, is that distribution zone strengthens the estimated effect of mean annual temperature - it explains residual variation around the temp - AE relationship. 
+According to this measure, the model with distribution is better than the one with latitude, which is not surprising given the seemingly non-linear relationship with latitude. Another explanation for this, is that including distribution zone strengthens the estimated effect of mean annual temperature; it explains residual variation around the temp-AE relationship. 
 
 ```{r}
 ggplot(dat, aes(x = mean_ann_temp, y = E_SS, color = dist_zone)) + 
-  geom_point(alpha = 0.5) + 
+  geom_point(alpha = 0.5, aes(size = 1/stderr_ss)) + 
   geom_smooth(method = lm, se = F) +
-  labs(x = 'Mean annual temperature', y = "Activation energy", color = "exact location?") 
+  labs(x = 'Mean annual temperature', y = "Activation energy", color = "exact location?", size = "Weight") 
 ```
 
 Thus, I'll retain distribution in the model as a proxy for seasonality, but I'll drop latitude.
@@ -488,16 +536,15 @@ dat$habitat_d1[which(dat$habitat_d == "NA")] <- NA
 # sum(is.na(dat$habitat_d))
 ```
 ```{r}
-mod7 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone + habitat_d1, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod7 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + dist_zone + habitat_d1, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-When we add habitat to the model, we find that terrestrial species have higher AE, but the effect is only marginally significant.
+Adding habitat to the model improves DIC, but the parameter is not significant.
 
 ```{r}
 summary(mod7)
@@ -509,7 +556,8 @@ Terrestrial species have higher AE on average than aquatic species (combines bot
 ggplot(filter(dat, !is.na(habitat_d1)),
        aes(x = habitat_d1, y = E_SS)) +
   geom_boxplot() +
-  geom_point(position = position_jitter(width = 0.2)) 
+  geom_point(aes(size = 1/stderr_ss), position = position_jitter(width = 0.2), alpha = 0.3) +
+  labs(size = "Weight")
 ```
 
 We might expect the aquatic - terrestrial dichotomy to be particularly important in more seasonal locations. That is, there may be an interaction between our seasonality proxy (distribution) and habitat. Unfortunately, this cuts the data quite thin, as there are not many freshwater and terrestrial species in each distribution category.
@@ -518,17 +566,25 @@ We might expect the aquatic - terrestrial dichotomy to be particularly important
 ggplot(filter(dat, !is.na(habitat_d1)),
        aes(x = habitat_d1, y = E_SS)) +
   geom_boxplot() +
-  geom_point(position = position_jitter(width = 0.2)) +
-  facet_wrap(~dist_zone)
+  geom_point(aes(size = 1/stderr_ss), position = position_jitter(width = 0.2), alpha = 0.3) +
+  facet_wrap(~dist_zone) +
+   labs(size = "Weight")
+```
+```{r}
+# # same plot, but with latitude
+# ggplot(filter(dat, !is.na(habitat_d1)),
+#        aes(x = lat_abs, y = E_SS, color = habitat_d1)) +
+#   geom_point(aes(size = 1/stderr_ss), position = position_jitter(width = 0.2), alpha = 0.3) +
+#   geom_smooth(se = F, method = lm) +
+#   labs(size = "Weight")
 ```
 
-When we add this interaction to the model, it is not much of an improvement.
+When we add this interaction to the model, it is not an improvement.
 
 ```{r}
-mod8 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone * habitat_d1, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod8 <- MCMCglmm(E_SS ~ mean_ann_temp + dist_zone * habitat_d1, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
@@ -537,7 +593,7 @@ mod8 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone * habitat_
 summary(mod8)
 ```
 
-To summarize, AE tends to be higher with low mean locale temperatures, high latitudes, and terrestrial habitats. Individually, most effects are weak and borderline significant. However, together they are consistent with the idea that high seasonality favors high AE.
+To summarize, AE tends to be higher with low mean locale temperatures and terrestrial habitats.
 
 ### Host-parasite characteristics
 
@@ -554,16 +610,15 @@ dat$plant_anim[which(dat$plant_anim == "NA")] <- NA
 ```
 
 ```{r}
-mod9 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone + habitat_d1 + plant_anim, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod9 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + dist_zone + habitat_d1 + plant_anim, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-Distinguishing plants and animals is not significant, though plant parasites tend to have lower AE than animal parasites. Also, I imagine this distinction is strongly conflated with phylogeny.
+Distinguishing plants and animals is not significant, though the model DIC goes down. Plant parasites tend to have lower AE than animal parasites. Also, I imagine this distinction is strongly conflated with phylogeny.
 
 ```{r}
 summary(mod9)
@@ -572,10 +627,10 @@ summary(mod9)
 Here's the plot comparing plant and animal parasites.
 
 ```{r}
-ggplot(dat,        aes(x = plant_anim, y = E_SS)) +
+ggplot(dat, aes(x = plant_anim, y = E_SS)) +
   geom_boxplot(outlier.size = NULL, outlier.alpha = 0) +
-  geom_point(position = position_jitter(width = 0.25, height = 0)) +
-  labs(x = NULL, y = "Activation energy")
+  geom_point(aes(size = 1/stderr_ss), position = position_jitter(width = 0.2), alpha = 0.3) +
+  labs(x = NULL, y = "Activation energy", size = "Weight")
 ```
 
 #### Endotherm in life cycle
@@ -587,7 +642,7 @@ dat <- dat%>%mutate(endo_ecto = if_else(grepl(hosts..in.order., pattern = "mamma
                                  if_else(grepl(hosts..in.order., pattern = "bird"), "endotherm in life cycle", "no endotherm in life cycle")))
 ```
 
-This variable nearly retains the previous plant-animal dichotomy; it simply splits animal parasites into two groups. 
+This variable basically retains the previous plant-animal dichotomy, but it additionally splits animal parasites into two groups.
 
 ```{r}
 table(dat$endo_ecto, dat$plant_anim)
@@ -599,16 +654,15 @@ dat <- dat%>%mutate(endo_ecto2 = if_else(plant_anim == "plant", "plant", endo_ec
 ```
 
 ```{r}
-mod10 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone + habitat_d1 + endo_ecto2, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod10 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + dist_zone + habitat_d1 + endo_ecto2, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-The term contrasting animal parasites with and without endotherms in the cycle was marginally significant. It suggests species without endotherms have higher AEs.
+The term contrasting animal parasites with and without endotherms in the cycle was significant, and it suggested that species without endotherms have higher AEs.
 
 ```{r}
 summary(mod10)
@@ -619,17 +673,17 @@ However, this trend is not visible in the raw data, suggesting it is contingent 
 ```{r}
 ggplot(dat, aes(x = endo_ecto2, y = E_SS)) +
   geom_boxplot(outlier.size = NULL, outlier.alpha = 0) +
-  geom_point(aes(), position = position_jitter(width = 0.25, height = 0)) +
-  labs(x = NULL, y = "Activation energy")
+  geom_point(aes(size = 1/stderr_ss), position = position_jitter(width = 0.2), alpha = 0.3) +
+  labs(x = NULL, y = "Activation energy", size = "Weight")
 ```
 
 When we plot these groups as a function of mean annual temperature, we then see that, at a given temperature, species exclusively infecting ectotherms have higher AE. This pattern is not strong, but it is consistent with the idea that environmental stability lowers AE (endotherms provide a stable temperature for helminths).
 
 ```{r}
 ggplot(dat, aes(x = mean_ann_temp, color = endo_ecto2, y = E_SS)) +
-  geom_point(alpha = 0.5) +
+  geom_point(aes(size = 1/stderr_ss), alpha = 0.5) +
   geom_smooth(method = lm, se = F) +
-  labs(x = "Mean annual temperature", y = "Activation energy", color = NULL)
+  labs(x = "Mean annual temperature", y = "Activation energy", color = NULL, size = "Weight")
 ```
 
 #### Stage in or out of host?
@@ -644,29 +698,28 @@ dat$devo_type[which(dat$devo_type == "NA")] <- NA
 
 
 ```{r}
-mod11 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone + habitat_d1 + endo_ecto2 + devo_type, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod11 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + dist_zone + habitat_d1 + endo_ecto2 + devo_type, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
 ```
 
-This term is not significant, suggesting activation energies are similar for parasite stages within hosts and in the external environment.
+This term is not significant and the model DIC is worse.
 
 ```{r}
 summary(mod11)
 ```
 
-Worms outside the host have slightly higher AE, which is also consistent with the idea that environmental variation favors higher AE. But, as noted, this was not significant. The plot also shows that habitat and in/outside host are conflated, as proportionally more of the terrestrial values are outside the host and more of the aquatic values are inside the host.
+Though the difference is not significant, worms outside the host have slightly higher AEs, which is also consistent with the idea that environmental variation favors higher AE. The plot also shows that habitat and in/outside host are conflated, as proportionally more of the terrestrial values are outside the host and more of the aquatic values are inside the host.
 
 ```{r}
 ggplot(dat, aes(x = devo_type, y = E_SS)) +
   geom_boxplot(outlier.size = NULL, outlier.alpha = 0) +
-  geom_point(aes(color = habitat_d1), 
+  geom_point(aes(color = habitat_d1, size = 1/stderr_ss), 
              position = position_jitter(width = 0.25, height = 0)) +
-  labs(x = NULL, y = "Activation energy", color = "Habitat")
+  labs(x = NULL, y = "Activation energy", color = "Habitat", size = "Weight")
 ```
 
 #### Target host
@@ -687,13 +740,12 @@ dat <- mutate(dat,
                                            if_else(devo_type2 == 'outside host', 'outside host: targets invert', devo_type2))))
 ```
 
-Distinguishing between invertebrates and vertebrates as next host does not improve the model.
+Distinguishing between invertebrates and vertebrates as next host slightly improves the model, but the contrasts are not significant.
 
 ```{r}
-mod12 <- MCMCglmm(E_SS ~ poly(num_temps,2) + mean_ann_temp + dist_zone + habitat_d1 + endo_ecto2 + devo_type3, 
-                 random = ~ binomial + tree_tips, # w/in spp + phylogenetic effx
-                 data = dat, 
-                 prior = prior2,
+mod12 <- MCMCglmm(E_SS ~ mean_ann_temp_cen + dist_zone + habitat_d1 + endo_ecto2 + devo_type3, 
+                 random = ~ binomial + tree_tips + idh(stderr_ss):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
                  nitt=63000, thin = 50,
                  ginverse = list(tree_tips=Ainv),
                  family = "gaussian", pr=F, verbose = F)
@@ -704,23 +756,23 @@ summary(mod12)
 ```{r}
 ggplot(dat, aes(x = devo_type3, y = E_SS, color = devo_type)) +
   geom_boxplot(outlier.size = NULL, outlier.alpha = 0) +
-  geom_point(position = position_jitter(width = 0.25, height = 0))+
+  geom_point(aes(size = 1/stderr_ss), position = position_jitter(width = 0.25, height = 0), alpha = 0.2)+
   coord_flip() +
-  labs(x = "Activation energy", y = NULL, color = NULL)
+  labs(x = "Activation energy", y = NULL, color = NULL, size = "Weight")
 ```
 
 
 # Conclusions
 
-In this analysis of activation energies in helminths, I account for two sources of pseudoreplication: (1) multiple measurements on a single parasite species and (2) shared ancestry. A mixed model including both factors suggested that shared ancestry has a clear effect on AEs: related species tend to exhibit similar activation energies.
+In this analysis of activation energies in helminths, I account for measurement variance (standard error of activation energy estimates) and I account for two sources of pseudoreplication: (1) multiple measurements on a single parasite species and (2) shared ancestry. A mixed model including both factors suggested that shared ancestry has a clear effect on AEs: related species tend to exhibit similar activation energies.
 
-Next, I evaluated various environmental characteristics and found that activation energies tend to be higher at low temperatures, high latitudes, and in terrestrial environments. These results all suggest AE is higher where seasonality or environmental variation is higher. Finally, I assessed characteristics of the host-parasite interaction, and I found that animal parasites with endotherms in the life cycle tend to have lower AE, consistent with the notion of temperature stability affecting temperature sensitivities.
+Next, I evaluated various environmental characteristics and found that activation energies tend to be higher at low temperatures and high latitudes. Finally, I assessed characteristics of the host-parasite interaction, and I found that animal parasites with endotherms in the life cycle tend to have lower AE, consistent with the notion of temperature stability affecting temperature sensitivities.
 
 Finally, let's quantitatively summarize the results. For each of the fitted models, I compiled the df, the DIC, and the R^2^. I calculated R^2^ according to [Nakagawa and Schielzeth 2013](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/j.2041-210x.2012.00261.x%4010.1111/%28ISSN%292041-210X.STATSTOO). They distinguish between marginal and conditional R^2^. Marginal R^2^ is the proportion of variation explained by the fixed effects while conditional R^2^ is the variation explained by both fixed and random effects. When the term is followed by an asterisk, I retained it in the model.  
 
 ```{r}
 # the series of models fit
-mod_series <- c("just within-species*", "+ phylogeny*", "+ number of temps*", "+ mean annual temp*",
+mod_series <- c("just within-species*", "+ phylogeny*", "+ mean annual temp*",
                 "+ min/max temps", "+ latitude", "+ distribution zone*", "+ habitat (aquatic vs terrestrial)*",
                 "+ distribution x habitat interacton", "+ plant vs animal parasite*", "+ endotherm in life cycle?*",
                 "+ stage in/out of host*", "+ target host: invert vs vert")
@@ -730,7 +782,7 @@ mod_series <- c("just within-species*", "+ phylogeny*", "+ number of temps*", "+
 i <- 0
 if(exists("mod_dic")){rm(mod_dic)}
 if(exists("mod_df")){rm(mod_df)}
-for(m in list(mod0, mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12)){
+for(m in list(mod0, mod1, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12)){
   if(i == 0){
     mod_dic <- m$DIC
     mod_df <- m$Fixed$nfl + length(m$Random$nrt)
@@ -748,7 +800,7 @@ i <- 0
 if(exists("r2c")){rm(r2c)}
 if(exists("r2m")){rm(r2m)}
 
-for(m in list(mod0, mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12)){
+for(m in list(mod0, mod1, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12)){
 
   # calculate fixed effects var
   fixVar <- numeric(length(m$Sol[,1]))
@@ -761,7 +813,7 @@ for(m in list(mod0, mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10,
   resi <- which(colnames(m$VCV) == 'units') # remove resid variance from variance components
   randVar <- m$VCV[,-resi]
   if(!is.null(colnames(randVar))){ # if only one random effect, it is unnamed and can't use rowSums
-    randVar <- rowSums(randVar)
+    randVar <- rowSums(randVar)-1
     }
   
   # resid var
@@ -781,6 +833,8 @@ for(m in list(mod0, mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10,
   i <- i + 1
 }
 ```
+
+
 ```{r}
 end_tbl <- data.frame(model = mod_series, df = mod_df)
 end_tbl <- mutate(end_tbl, df_used = df - lag(df, 1))
@@ -789,12 +843,7 @@ end_tbl$R2m <- round(r2m_o, 2)
 end_tbl$R2c <- round(r2c_o, 2)
 ```
 ```{r}
-# plot(r2c)
-```
-```{r}
 knitr::kable(end_tbl)
 ```
 
-The most complex model, one that includes phylogeny, seemingly important environmental variables, and characteristics of the host-parasite system, explained over 90% of the variation in activation energy. Much of this is due to the random effects (phylogeny and multiple measurements on a species account for >70% of the variation), but around 15% of the variation can be explained by fixed effects. 
-
-I see three steps to finalize these analyses. First, are there predictors that are missing or that I have not considered? Second, is the model building logical? Adding terms in a different order is probably justifiable - this can be quite important for interpreting confounded variables. Finally, activation energies should be weighted by 'quality' (such as their standard errors). 
+The most complex model, one that includes phylogeny, seemingly important environmental variables, and characteristics of the host-parasite system, explained over 89% of the variation in activation energy. Much of this is due to the random effects (phylogeny and repeated measures account for >70% of the variation), but around 15% of the variation can be explained by fixed effects. 

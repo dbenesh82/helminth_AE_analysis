@@ -1,8 +1,8 @@
 ---
 title: "Determinants of helminth activation energy (Arrhenius)"
 author: "Dan Benesh"
-date: "October 24, 2019"
-output: html_document
+date: "November 4, 2019"
+output: github_document
 ---
 
 The purpose of this notebook is to explore and model the activation energies for helminth development. I specifically use activation energies fit with the **Arrhenius** model.
@@ -20,9 +20,9 @@ theme_set(new = theme_bw())
 ```
 
 ```{r importdata}
-ae <- read.csv(file = "SS_Arr_FitResults_1910.csv", header = TRUE)
-dat <- read.csv(file = "Helminth data plant + animal global temps Sept8 2019.csv", header = TRUE)
-tree <- read.tree(file = "full_tree_time_calib.nex")
+ae <- read.csv(file = "../data/SS_Arr_FitResults_1910.csv", header = TRUE)
+dat <- read.csv(file = "../data/Helminth data plant + animal global temps Sept8 2019.csv", header = TRUE)
+tree <- read.tree(file = "../data/full_tree_time_calib.nex")
 ```
 ```{r}
 dat <- select(dat, tpc_num, Genus, Species, Family, Order, Class, Phylum, 
