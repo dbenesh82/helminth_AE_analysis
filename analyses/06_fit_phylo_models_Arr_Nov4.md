@@ -1,7 +1,7 @@
 Determinants of helminth activation energy (Arrhenius)
 ================
 Dan Benesh
-November 4, 2019
+November 15, 2019
 
 The purpose of this notebook is to explore and model the activation
 energies for helminth development. I specifically use activation
@@ -72,24 +72,81 @@ high standard error is associated with higher activation energy.
 Thus, when we weight the data points by the standard error of the
 activation energies, it should shift the overall mean down.
 
-How many AE estimates per species?
+## Same experiment, different metrics
+
+In some cases, multiple TPCs were fit to data from the same experiment.
+For example, one curve fit for minimum developmental time and one for
+maximum developmental time. These are not independent because the same
+individual parasites contribute to both metrics. In these cases AE
+measurements should be highly correlated.
+
+Let’s make a plot for the species with multiple activation energy
+measurements. When we do this, we see that AE estimates from the same
+experiment tend to cluster as expected.
+
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+
+This indicates how these values are not independent. Since this is an
+issue that only affects a few species, I’m not inclined to devise an
+`experiment` random effect that accounts for this pseudoreplication
+statistically. Rather, I would probably only take a single AE per
+experiment. But which one?
+
+We can zoom in on just these cases where there are multiple measurements
+from the same experiment. If the metric was minimum development time,
+activation energy is higher; if it was maximum development time,
+activation energy is lower. This demonstrates that the developmental
+metric impacts activation energy estimates.
+
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-23-1.png)<!-- -->
+
+This also highlights the concerns Peter has raised about *apparent*
+developmental rates, in that development is not measured for all viable
+worms (ones that die before maturing are excluded). We can examine
+whether activation energy varies systematically with developmental
+metric. It does, but not conspicuously or in the same way as within an
+experiment. For example, the ‘max’ group is higher than the ‘min’ group
+overall, while this was reversed within experiments.
+
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
+
+Overall, most activation energies were based on mean developmental
+rates. Thus, in the few cases where multiple TPCs were fit to data from
+the same experiment, but different metrics, I would only retain the
+activation energy for mean devo time.
+
+    ## 
+    ##           min 50% developed      midpoint          mean           max 
+    ##            39            22             9            52             7 
+    ## not specified 
+    ##            13
+
+In some cases, the source of repeated measures on a single species was
+recorded. For example, if the temperature dependence of multiple
+parasite populations or life stages was studied. We can also plot these
+variables in a similar to above. I do not notice an obvious trend.
+
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
+
+After removing AEs from the same experiment, how many AE estimates per
+species?
 
     ##    binomial               n        
     ##  Length:87          Min.   :1.000  
     ##  Class :character   1st Qu.:1.000  
     ##  Mode  :character   Median :1.000  
-    ##                     Mean   :1.632  
+    ##                     Mean   :1.483  
     ##                     3rd Qu.:2.000  
     ##                     Max.   :8.000
 
 Usually just one, but up to 8. For visualizing, I’ll randomly take one
 AE per species.
 
-This reduces the data from n = 142 to n = 87.
+This reduces the data from n = 129 to n = 87.
 
 Make a plot of the distribution of activation energy across the tree.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-32-1.png)<!-- -->
 
 The bars on the right are the estimated activation energies. Maybe some
 clades at the top (nematodes) have higher values than those at the
@@ -129,7 +186,7 @@ After fitting an MCMC model, a first quality check is looking at chain
 mixing. Essentially, we want the chain to bounce back and forth randomly
 - it shouldn’t get stuck at particular parameter estimates.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-37-1.png)<!-- -->
 
 The within-species effect, `binomial`, mixes well and is non-zero,
 suggesting that multiple AE measurements on the same species tend to be
@@ -144,12 +201,12 @@ The model intercept (the average activation energy) is about 0.66
     ##  Thinning interval  = 10
     ##  Sample size  = 2000 
     ## 
-    ##  DIC: -27.72248 
+    ##  DIC: -22.66692 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.04283  0.02348  0.06474     2000
+    ## binomial   0.03944  0.01802   0.0626     1451
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -159,19 +216,19 @@ The model intercept (the average activation energy) is about 0.66
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.03161  0.02056  0.04411     1857
+    ## units   0.03212  0.01901  0.04745     1672
     ## 
     ##  Location effects: E_Arr ~ 1 
     ## 
     ##             post.mean l-95% CI u-95% CI eff.samp  pMCMC    
-    ## (Intercept)    0.6588   0.6033   0.7169     1869 <5e-04 ***
+    ## (Intercept)    0.6509   0.6008   0.7079     2000 <5e-04 ***
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
 Here’s the proportion of variation attributable to the within-species
 effect.
 
-    ## [1] 0.5769698
+    ## [1] 0.5546039
 
 It is high. On the one hand this makes sense, as many species only had a
 single measurement (and hence no residual value after accounting for a
@@ -182,7 +239,7 @@ One can see that some species tend to have very similar measurements,
 while for other species, there is a fair amount of spread in the
 estimated activation energies.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-31-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-41-1.png)<!-- -->
 
 ### Phylogenetic effect
 
@@ -199,7 +256,7 @@ After fitting, we can again plot the chains. They look good. The
 within-species effect (`binomial`) is smaller than the phylogenetic
 effect (`tree_tips`).
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-35-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-45-1.png)<!-- -->
 
 These results suggest that phylogenetically related species tend to have
 similar AEs, and when a species is measured multiple times, the
@@ -207,15 +264,72 @@ estimated AEs are similar, though they are not far more similar than
 what they are expected to be based on phylogeny (i.e. the within-species
 effect does not explain much additional variation beyond phylogeny).
 
-The phylogenetic effect is strong. It explained 60% of the variation in
+The phylogenetic effect is strong. It explained 61% of the variation in
 AE.
 
-By contrast, the ‘species’ effect explained 11% of the variation.
+By contrast, the ‘species’ effect explained 10% of the variation.
 
 Here’s a plot splitting AE by parasite order. It does look like some
 clades tend to have higher or lower AEs.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-38-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-48-1.png)<!-- -->
+
+#### Developmental metric
+
+As seen above, the chosen metric of development can affect activation
+energy estimates, at least within experiments. This was less clear
+across experiments. To check this effect, I added a fixed factor to the
+model that distinguishes between activation estimates based on mean,
+min, or unspecific developmental times.
+
+These differences were rather minimal (non-significant p-values).
+Moreover, the contrast between mean and min metrics was negative (min
+with lower AE than mean), which was opposite to that seen within
+experiments.
+
+    ## 
+    ##  Iterations = 3001:62951
+    ##  Thinning interval  = 50
+    ##  Sample size  = 1200 
+    ## 
+    ##  DIC: -44.79256 
+    ## 
+    ##  G-structure:  ~binomial
+    ## 
+    ##          post.mean l-95% CI u-95% CI eff.samp
+    ## binomial   0.01004 0.001954  0.02066     1078
+    ## 
+    ##                ~tree_tips
+    ## 
+    ##           post.mean l-95% CI u-95% CI eff.samp
+    ## tree_tips   0.07123  0.01829   0.1315     1101
+    ## 
+    ##                ~idh(stderr_arr):units
+    ## 
+    ##                  post.mean l-95% CI u-95% CI eff.samp
+    ## stderr_arr.units         1        1        1        0
+    ## 
+    ##  R-structure:  ~units
+    ## 
+    ##       post.mean l-95% CI u-95% CI eff.samp
+    ## units   0.02779  0.01797  0.03919     1200
+    ## 
+    ##  Location effects: E_Arr ~ trait_detail3 
+    ## 
+    ##                            post.mean  l-95% CI  u-95% CI eff.samp  pMCMC
+    ## (Intercept)                 0.660748  0.401555  0.941275     1200 <8e-04
+    ## trait_detail3min           -0.002775 -0.096603  0.097183     1200  0.907
+    ## trait_detail3not specified  0.116393 -0.015031  0.277114     1538  0.110
+    ##                               
+    ## (Intercept)                ***
+    ## trait_detail3min              
+    ## trait_detail3not specified    
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Thus, it is not clear how valuable this term is in the model. It does
+not “correct” activation energies in the direction we would expect.
+Therefore, I have not included it in further analyses.
 
 ### Environmental variables
 
@@ -246,17 +360,17 @@ The effect of mean locale temperature is negative and significant.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -47.26704 
+    ##  DIC: -47.63916 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01342 0.003396  0.02738     1064
+    ## binomial   0.01233 0.002543  0.02566     1098
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.05368  0.01196    0.109     1074
+    ## tree_tips   0.05237  0.01411   0.1072    951.3
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -266,13 +380,13 @@ The effect of mean locale temperature is negative and significant.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units     0.029  0.02029  0.03998     1200
+    ## units   0.02761  0.01685  0.03819     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen 
     ## 
-    ##                   post.mean  l-95% CI  u-95% CI eff.samp   pMCMC    
-    ## (Intercept)        0.683708  0.446133  0.923915     1200 < 8e-04 ***
-    ## mean_ann_temp_cen -0.008610 -0.015748 -0.002332     1321 0.00833 ** 
+    ##                   post.mean  l-95% CI  u-95% CI eff.samp  pMCMC    
+    ## (Intercept)        0.688645  0.483050  0.924100     1200 <8e-04 ***
+    ## mean_ann_temp_cen -0.008826 -0.015781 -0.002149     1200  0.005 ** 
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
@@ -280,7 +394,7 @@ For species living at lower temperatures, development speeds up more as
 temperature increases. It also does not look like this depends on
 whether an exact study location was given.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-43-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-55-1.png)<!-- -->
 
 #### Temperature variation
 
@@ -294,17 +408,17 @@ decreases, suggesting together they explain some variation.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -52.0785 
+    ##  DIC: -51.97266 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01559 0.003416  0.02979     1200
+    ## binomial   0.01385 0.002804  0.02786     1030
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.06007   0.0132   0.1277    964.4
+    ## tree_tips   0.05681  0.01028   0.1123     1260
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -314,15 +428,15 @@ decreases, suggesting together they explain some variation.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02723  0.01757  0.03843     1200
+    ## units   0.02572  0.01587  0.03705     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + max_month_temp_cen + min_month_temp_cen 
     ## 
-    ##                    post.mean l-95% CI u-95% CI eff.samp  pMCMC    
-    ## (Intercept)          0.73493  0.46741  1.00952     1445 <8e-04 ***
-    ## mean_ann_temp_cen   -0.04018 -0.10505  0.02256     1200  0.230    
-    ## max_month_temp_cen   0.02198 -0.01523  0.06284     1200  0.270    
-    ## min_month_temp_cen   0.01363 -0.01776  0.04423     1200  0.388    
+    ##                    post.mean  l-95% CI  u-95% CI eff.samp  pMCMC    
+    ## (Intercept)         0.708671  0.468021  0.991658     1230 <8e-04 ***
+    ## mean_ann_temp_cen  -0.031247 -0.088675  0.032841     1200  0.325    
+    ## max_month_temp_cen  0.017194 -0.016606  0.054760     1200  0.340    
+    ## min_month_temp_cen  0.008869 -0.020086  0.038679     1328  0.550    
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
@@ -331,9 +445,9 @@ positive, which is opposite to the trend seen with mean temp. But when
 we plot AE as a function of max and min, we see a negative relationship
 just like for mean temp: low temps, high AE.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-46-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-58-1.png)<!-- -->
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-47-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-59-1.png)<!-- -->
 
 This is suggestive that, once controlling for mean temp, activation
 energies increase with higher max and min temps. Let’s see if we can
@@ -341,8 +455,8 @@ uncover this pattern in the data. We’ll take the residuals from the
 previous model, which just included mean temperature, and plot them
 again max and min temp.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-49-1.png)<!-- -->
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-50-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-61-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-62-1.png)<!-- -->
 
 We uncover the positive relationships, but they are clearly weak. Thus,
 we are in a situation when one metric (DIC) suggests adding `max` and
@@ -389,17 +503,17 @@ There is a marginal relationship between AE and latitude.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -47.54474 
+    ##  DIC: -46.99349 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01362 0.003168  0.02702     1038
+    ## binomial    0.0112 0.002069  0.02196     1094
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.04603  0.01147  0.09731    819.5
+    ## tree_tips   0.04359 0.007695  0.08582    924.5
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -409,14 +523,14 @@ There is a marginal relationship between AE and latitude.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02902  0.02001  0.03942     1200
+    ## units   0.02749  0.01788  0.03872     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + lat_abs 
     ## 
-    ##                   post.mean  l-95% CI  u-95% CI eff.samp  pMCMC    
-    ## (Intercept)        1.012662  0.647379  1.357212     1200 <8e-04 ***
-    ## mean_ann_temp_cen -0.020241 -0.032747 -0.008539     1200 <8e-04 ***
-    ## lat_abs           -0.006954 -0.013079 -0.001196     1227 0.0267 *  
+    ##                   post.mean  l-95% CI  u-95% CI eff.samp   pMCMC    
+    ## (Intercept)        1.029303  0.655740  1.359615     1200 < 8e-04 ***
+    ## mean_ann_temp_cen -0.020925 -0.034327 -0.010114     1200 0.00333 ** 
+    ## lat_abs           -0.007384 -0.014038 -0.001374     1200 0.02167 *  
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
@@ -424,7 +538,7 @@ Surprisingly, the parameter estimate for latitude is negative, but when
 we plot it, we see that activation energies tend to increase with
 latitude.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-54-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-66-1.png)<!-- -->
 
 This suggests that, like for `min` and `max` temperature, correlations
 among variables (here between mean temp and latitude) might cause
@@ -434,7 +548,7 @@ model with just mean temp), and then plot the residual variation as a
 function of latitude, we see essentially no relationship between
 latitude and activation energy.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-55-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-67-1.png)<!-- -->
 
 Thus, even though the term was significant, the effect of latitude is
 hard to interpret and not an obvious improvement to the model. Let’s
@@ -451,7 +565,7 @@ for parasites with a broad distribution.
 However, the distribution categories are still tightly linked to
 latitude.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-57-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-69-1.png)<!-- -->
 
 Nonetheless, let’s add this variable to the model instead of latitude.
 
@@ -462,17 +576,17 @@ Most of the contrasts among these categories are not significant.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -48.08072 
+    ##  DIC: -48.28212 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01591  0.00375  0.02975     1042
+    ## binomial    0.0139 0.004014  0.02744     1092
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.04397 0.004902  0.09404    920.1
+    ## tree_tips   0.04449 0.008599  0.09394    904.9
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -482,37 +596,37 @@ Most of the contrasts among these categories are not significant.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02809  0.01781  0.03852     1200
+    ## units   0.02661  0.01689  0.03798     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + dist_zone 
     ## 
-    ##                      post.mean  l-95% CI  u-95% CI eff.samp  pMCMC    
-    ## (Intercept)           0.663730  0.414646  0.903509     1200 <8e-04 ***
-    ## mean_ann_temp_cen    -0.014635 -0.023810 -0.006094     1200 <8e-04 ***
-    ## dist_zonetemperate   -0.054385 -0.232698  0.128966     1200  0.527    
-    ## dist_zonesubtropical  0.147465 -0.089667  0.400442     1766  0.247    
-    ## dist_zonetropical     0.157368 -0.144473  0.422681     1347  0.278    
-    ## dist_zoneglobal       0.062189 -0.113628  0.241392     1200  0.487    
+    ##                      post.mean  l-95% CI  u-95% CI eff.samp   pMCMC    
+    ## (Intercept)           0.673514  0.415604  0.921991   1200.0 < 8e-04 ***
+    ## mean_ann_temp_cen    -0.013554 -0.022004 -0.004936   1200.0 0.00167 ** 
+    ## dist_zonetemperate   -0.058038 -0.236731  0.127131    997.9 0.50167    
+    ## dist_zonesubtropical  0.112318 -0.131427  0.358740   1200.0 0.35000    
+    ## dist_zonetropical     0.131854 -0.163470  0.401075   1200.0 0.37500    
+    ## dist_zoneglobal       0.047345 -0.118749  0.235358   1200.0 0.60167    
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
 Consistent with the pattern for temperature and latitude, polar species
 tend to have higher AE.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-60-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-72-1.png)<!-- -->
 
 Latitude and distribution overlap and presumably explain the same
 variation in AE, but which explains it better? We can compare the models
 with latitude vs distribution zone using information criteria. Here is
 the progression of model fits thus far (low DIC, better model):
 
-    ## [1] "DIC for model with phylogeny: -44.6"
+    ## [1] "DIC for model with phylogeny: -44"
 
-    ## [1] "DIC for model with just mean temp: -47.3"
+    ## [1] "DIC for model with just mean temp: -47.6"
 
-    ## [1] "DIC for model with latitude: -47.5"
+    ## [1] "DIC for model with latitude: -47"
 
-    ## [1] "DIC for model with distribution zone: -48.1"
+    ## [1] "DIC for model with distribution zone: -48.3"
 
 According to this measure, the model with distribution is better than
 the one with latitude. One explanation for this, is that including
@@ -520,7 +634,7 @@ distribution zone strengthens the estimated effect of mean annual
 temperature; it explains residual variation around the temp-AE
 relationship.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-62-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-74-1.png)<!-- -->
 
 Thus, I’ll retain distribution in the model as a proxy for seasonality,
 but I’ll drop latitude.
@@ -542,17 +656,17 @@ significant.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -49.42372 
+    ##  DIC: -49.90825 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01474 0.002587  0.02847     1005
+    ## binomial   0.01287 0.002076  0.02478    951.6
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.05477 0.007425   0.1167    829.4
+    ## tree_tips    0.0569 0.005641   0.1177    878.5
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -562,18 +676,18 @@ significant.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units    0.0279  0.01792  0.03873     1200
+    ## units   0.02602  0.01617  0.03624     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + dist_zone + habitat_d1 
     ## 
-    ##                       post.mean l-95% CI u-95% CI eff.samp   pMCMC   
-    ## (Intercept)             0.64218  0.39195  0.94716   1200.0 0.00167 **
-    ## mean_ann_temp_cen      -0.01475 -0.02339 -0.00543   1200.0 0.00667 **
-    ## dist_zonetemperate     -0.05359 -0.23087  0.12031   1039.8 0.56667   
-    ## dist_zonesubtropical    0.14086 -0.09710  0.37388   1200.0 0.25333   
-    ## dist_zonetropical       0.16154 -0.12028  0.42169   1200.0 0.25000   
-    ## dist_zoneglobal         0.04584 -0.11893  0.22708    821.6 0.63500   
-    ## habitat_d1terrestrial   0.07913 -0.12846  0.25748    993.3 0.41833   
+    ##                       post.mean  l-95% CI  u-95% CI eff.samp   pMCMC    
+    ## (Intercept)            0.644400  0.355889  0.947751     1200 0.00167 ** 
+    ## mean_ann_temp_cen     -0.013992 -0.022700 -0.005731     1200 < 8e-04 ***
+    ## dist_zonetemperate    -0.052732 -0.233651  0.122878     1091 0.55833    
+    ## dist_zonesubtropical   0.112776 -0.163163  0.343743     1075 0.37500    
+    ## dist_zonetropical      0.143146 -0.122848  0.408720     1200 0.33500    
+    ## dist_zoneglobal        0.036191 -0.144671  0.205379     1107 0.69167    
+    ## habitat_d1terrestrial  0.088498 -0.110212  0.294509     1099 0.39333    
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
@@ -583,7 +697,7 @@ demonstrates how weights (standard errors) reduced the estimated effect
 of habitat. The raw difference in AE between habitats was about 0.11,
 but the model estimated it to be lower, 0.07.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-66-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-78-1.png)<!-- -->
 
 We might expect the aquatic - terrestrial dichotomy to be particularly
 important in more seasonal locations. That is, there may be an
@@ -591,7 +705,7 @@ interaction between our seasonality proxy (distribution) and habitat.
 Unfortunately, this cuts the data quite thin, as there are not many
 freshwater and terrestrial species in each distribution category.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-67-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-79-1.png)<!-- -->
 
 When we add this interaction to the model, it is not an improvement.
 
@@ -600,17 +714,17 @@ When we add this interaction to the model, it is not an improvement.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -47.80855 
+    ##  DIC: -48.51064 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01519 0.002174  0.02984      949
+    ## binomial   0.01396 0.002892  0.02823     1047
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.05661 0.004792    0.129    776.2
+    ## tree_tips   0.05603 0.007263   0.1172    753.7
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -620,32 +734,32 @@ When we add this interaction to the model, it is not an improvement.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02782  0.01949   0.0395     1200
+    ## units   0.02581  0.01522  0.03612     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp + dist_zone * habitat_d1 
     ## 
     ##                                          post.mean  l-95% CI  u-95% CI
-    ## (Intercept)                               0.837226  0.493060  1.163947
-    ## mean_ann_temp                            -0.015883 -0.025016 -0.007216
-    ## dist_zonetemperate                       -0.137059 -0.391894  0.157207
-    ## dist_zonesubtropical                      0.209920 -0.042959  0.534642
-    ## dist_zonetropical                         0.214635 -0.189269  0.600731
-    ## dist_zoneglobal                          -0.028699 -0.334541  0.220330
-    ## habitat_d1terrestrial                    -0.025541 -0.350304  0.351125
-    ## dist_zonetemperate:habitat_d1terrestrial  0.159842 -0.221856  0.517289
-    ## dist_zonetropical:habitat_d1terrestrial  -0.052373 -0.537762  0.442153
-    ## dist_zoneglobal:habitat_d1terrestrial     0.142560 -0.217249  0.513922
+    ## (Intercept)                               0.825902  0.448981  1.114126
+    ## mean_ann_temp                            -0.014988 -0.024652 -0.007075
+    ## dist_zonetemperate                       -0.125854 -0.396295  0.153194
+    ## dist_zonesubtropical                      0.181740 -0.113907  0.461167
+    ## dist_zonetropical                         0.207935 -0.176665  0.625625
+    ## dist_zoneglobal                          -0.029729 -0.287784  0.241044
+    ## habitat_d1terrestrial                    -0.010996 -0.376541  0.317489
+    ## dist_zonetemperate:habitat_d1terrestrial  0.146181 -0.216783  0.513023
+    ## dist_zonetropical:habitat_d1terrestrial  -0.061943 -0.528063  0.428981
+    ## dist_zoneglobal:habitat_d1terrestrial     0.130850 -0.211289  0.500786
     ##                                          eff.samp   pMCMC    
-    ## (Intercept)                                  1200 < 8e-04 ***
-    ## mean_ann_temp                                1200 0.00167 ** 
-    ## dist_zonetemperate                           1200 0.32333    
-    ## dist_zonesubtropical                         1174 0.13333    
-    ## dist_zonetropical                            1200 0.27667    
-    ## dist_zoneglobal                              1628 0.83333    
-    ## habitat_d1terrestrial                        1444 0.87167    
-    ## dist_zonetemperate:habitat_d1terrestrial     1200 0.37667    
-    ## dist_zonetropical:habitat_d1terrestrial      1200 0.86667    
-    ## dist_zoneglobal:habitat_d1terrestrial        1200 0.45833    
+    ## (Intercept)                                 975.8 < 8e-04 ***
+    ## mean_ann_temp                              1200.0 0.00167 ** 
+    ## dist_zonetemperate                         1021.0 0.37833    
+    ## dist_zonesubtropical                       1047.4 0.21833    
+    ## dist_zonetropical                          1055.0 0.30333    
+    ## dist_zoneglobal                            1200.0 0.79667    
+    ## habitat_d1terrestrial                      1043.3 0.94833    
+    ## dist_zonetemperate:habitat_d1terrestrial   1350.5 0.42000    
+    ## dist_zonetropical:habitat_d1terrestrial    1262.7 0.80333    
+    ## dist_zoneglobal:habitat_d1terrestrial      1771.2 0.46000    
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
@@ -678,17 +792,17 @@ phylogeny.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -49.96749 
+    ##  DIC: -50.41971 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01484 0.002644  0.02885    941.7
+    ## binomial   0.01373 0.002072  0.02787    633.3
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.04819 0.004245   0.1114    747.6
+    ## tree_tips   0.04821 0.006711   0.1059    927.3
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -698,25 +812,25 @@ phylogeny.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02796  0.01785  0.03795     1200
+    ## units   0.02574   0.0169  0.03636     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + dist_zone + habitat_d1 + plant_anim 
     ## 
     ##                       post.mean  l-95% CI  u-95% CI eff.samp   pMCMC    
-    ## (Intercept)            0.648200  0.399136  0.925802     1200 0.00167 ** 
-    ## mean_ann_temp_cen     -0.014935 -0.023465 -0.006516     1601 < 8e-04 ***
-    ## dist_zonetemperate    -0.044978 -0.225292  0.129334     1032 0.61500    
-    ## dist_zonesubtropical   0.171123 -0.078206  0.402750     1200 0.16000    
-    ## dist_zonetropical      0.170307 -0.100552  0.431580     1200 0.23167    
-    ## dist_zoneglobal        0.040471 -0.138509  0.215901     1200 0.63667    
-    ## habitat_d1terrestrial  0.121800 -0.082900  0.336121     1200 0.21500    
-    ## plant_animplant       -0.232013 -0.499752  0.037332     1200 0.09667 .  
+    ## (Intercept)            0.657965  0.411077  0.936679     1200 0.00167 ** 
+    ## mean_ann_temp_cen     -0.014114 -0.023138 -0.006064     1200 < 8e-04 ***
+    ## dist_zonetemperate    -0.046449 -0.205130  0.133007     1200 0.55167    
+    ## dist_zonesubtropical   0.144467 -0.083823  0.388000     1207 0.22333    
+    ## dist_zonetropical      0.145581 -0.126935  0.413505     1200 0.31500    
+    ## dist_zoneglobal        0.030420 -0.129098  0.223659     1200 0.71000    
+    ## habitat_d1terrestrial  0.120660 -0.086550  0.310457     1200 0.19333    
+    ## plant_animplant       -0.232284 -0.502326  0.035679     1200 0.10000 .  
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
 Here’s the plot comparing plant and animal parasites.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-74-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-86-1.png)<!-- -->
 
 #### Endotherm in life cycle
 
@@ -731,8 +845,8 @@ it additionally splits animal parasites into two groups.
 
     ##                             
     ##                              animal plant
-    ##   endotherm in life cycle        95     0
-    ##   no endotherm in life cycle     23    24
+    ##   endotherm in life cycle        84     0
+    ##   no endotherm in life cycle     21    24
 
 We can thus combine these into a single variable to add to the model.
 
@@ -745,17 +859,17 @@ suggests species without endotherms have higher AEs.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -53.10099 
+    ##  DIC: -50.81563 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial    0.0171  0.00357  0.03249     1012
+    ## binomial   0.01454 0.002997  0.02858     1212
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.04609 0.002909   0.1099      654
+    ## tree_tips   0.04752 0.005304   0.1041    757.3
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -765,37 +879,37 @@ suggests species without endotherms have higher AEs.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02657  0.01771  0.03632     1200
+    ## units    0.0257  0.01605  0.03721     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + dist_zone + habitat_d1 + endo_ecto2 
     ## 
     ##                                      post.mean  l-95% CI  u-95% CI
-    ## (Intercept)                           0.617954  0.368866  0.866536
-    ## mean_ann_temp_cen                    -0.015970 -0.024700 -0.006942
-    ## dist_zonetemperate                   -0.053161 -0.230927  0.132304
-    ## dist_zonesubtropical                  0.184802 -0.057057  0.448520
-    ## dist_zonetropical                     0.169423 -0.111010  0.443546
-    ## dist_zoneglobal                       0.062433 -0.113678  0.246673
-    ## habitat_d1terrestrial                 0.113005 -0.095092  0.307456
-    ## endo_ecto2no endotherm in life cycle  0.110756 -0.040478  0.249125
-    ## endo_ecto2plant                      -0.174945 -0.483147  0.079104
-    ##                                      eff.samp   pMCMC    
-    ## (Intercept)                              1200 < 8e-04 ***
-    ## mean_ann_temp_cen                        1200 0.00167 ** 
-    ## dist_zonetemperate                       1200 0.56000    
-    ## dist_zonesubtropical                     1334 0.13333    
-    ## dist_zonetropical                        1200 0.25667    
-    ## dist_zoneglobal                          1200 0.47167    
-    ## habitat_d1terrestrial                    1083 0.27000    
-    ## endo_ecto2no endotherm in life cycle     1200 0.13833    
-    ## endo_ecto2plant                          1200 0.19833    
+    ## (Intercept)                           0.623763  0.336232  0.850788
+    ## mean_ann_temp_cen                    -0.015189 -0.023348 -0.006195
+    ## dist_zonetemperate                   -0.045680 -0.216683  0.113758
+    ## dist_zonesubtropical                  0.163947 -0.073725  0.418963
+    ## dist_zonetropical                     0.155336 -0.109802  0.435872
+    ## dist_zoneglobal                       0.049105 -0.128906  0.212301
+    ## habitat_d1terrestrial                 0.122355 -0.067562  0.339597
+    ## endo_ecto2no endotherm in life cycle  0.083763 -0.063926  0.224321
+    ## endo_ecto2plant                      -0.185874 -0.466608  0.092841
+    ##                                      eff.samp  pMCMC    
+    ## (Intercept)                            1200.0 <8e-04 ***
+    ## mean_ann_temp_cen                      1200.0 <8e-04 ***
+    ## dist_zonetemperate                     1200.0  0.622    
+    ## dist_zonesubtropical                   1200.0  0.198    
+    ## dist_zonetropical                      1200.0  0.278    
+    ## dist_zoneglobal                        1200.0  0.565    
+    ## habitat_d1terrestrial                  1200.0  0.232    
+    ## endo_ecto2no endotherm in life cycle   1200.0  0.247    
+    ## endo_ecto2plant                         964.9  0.198    
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
 However, this trend is not visible in the raw data, suggesting it is
 contingent on the covariates in the data.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-80-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-92-1.png)<!-- -->
 
 When we plot these groups as a function of mean annual temperature, we
 then see that, at a given temperature, species exclusively infecting
@@ -803,7 +917,7 @@ ectotherms have higher AE. This pattern is not strong, but it is
 consistent with the idea that environmental stability lowers AE
 (endotherms provide a stable temperature for helminths).
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-81-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-93-1.png)<!-- -->
 
 #### Stage in or out of host?
 
@@ -817,17 +931,17 @@ This term is not significant and the model DIC is worse.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -52.0404 
+    ##  DIC: -49.82448 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01703 0.003858  0.03284    958.3
+    ## binomial   0.01503 0.003221  0.02988    726.7
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.04762 0.004376   0.1167    679.9
+    ## tree_tips   0.04626  0.00441   0.1048    710.5
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -837,32 +951,32 @@ This term is not significant and the model DIC is worse.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02663  0.01732  0.03643     1096
+    ## units   0.02573  0.01717   0.0371     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + dist_zone + habitat_d1 + endo_ecto2 + devo_type 
     ## 
     ##                                      post.mean  l-95% CI  u-95% CI
-    ## (Intercept)                           0.604314  0.320844  0.874790
-    ## mean_ann_temp_cen                    -0.015948 -0.024467 -0.007212
-    ## dist_zonetemperate                   -0.055524 -0.235794  0.118604
-    ## dist_zonesubtropical                  0.180679 -0.046700  0.422269
-    ## dist_zonetropical                     0.171388 -0.141615  0.417286
-    ## dist_zoneglobal                       0.058342 -0.106578  0.244256
-    ## habitat_d1terrestrial                 0.120755 -0.077639  0.332393
-    ## endo_ecto2no endotherm in life cycle  0.120425 -0.028132  0.257241
-    ## endo_ecto2plant                      -0.170275 -0.478728  0.085044
-    ## devo_typeoutside host                 0.032914 -0.083872  0.134939
-    ##                                      eff.samp   pMCMC    
-    ## (Intercept)                            1200.0 < 8e-04 ***
-    ## mean_ann_temp_cen                      1200.0 0.00167 ** 
-    ## dist_zonetemperate                     1200.0 0.55667    
-    ## dist_zonesubtropical                   1200.0 0.14333    
-    ## dist_zonetropical                      1200.0 0.20833    
-    ## dist_zoneglobal                        1200.0 0.53000    
-    ## habitat_d1terrestrial                   960.2 0.24167    
-    ## endo_ecto2no endotherm in life cycle   1200.0 0.09000 .  
-    ## endo_ecto2plant                        1200.0 0.19667    
-    ## devo_typeoutside host                  1200.0 0.53333    
+    ## (Intercept)                           0.609292  0.337560  0.888309
+    ## mean_ann_temp_cen                    -0.014994 -0.024497 -0.006557
+    ## dist_zonetemperate                   -0.042584 -0.212505  0.139692
+    ## dist_zonesubtropical                  0.160288 -0.091369  0.417431
+    ## dist_zonetropical                     0.161607 -0.116727  0.460418
+    ## dist_zoneglobal                       0.052063 -0.141719  0.230135
+    ## habitat_d1terrestrial                 0.118062 -0.072271  0.323096
+    ## endo_ecto2no endotherm in life cycle  0.088953 -0.070787  0.222501
+    ## endo_ecto2plant                      -0.181504 -0.487741  0.080050
+    ## devo_typeoutside host                 0.025646 -0.071423  0.139446
+    ##                                      eff.samp  pMCMC    
+    ## (Intercept)                              1200 <8e-04 ***
+    ## mean_ann_temp_cen                        1414  0.005 ** 
+    ## dist_zonetemperate                       1200  0.618    
+    ## dist_zonesubtropical                     1200  0.223    
+    ## dist_zonetropical                        1200  0.242    
+    ## dist_zoneglobal                          1200  0.560    
+    ## habitat_d1terrestrial                    1003  0.233    
+    ## endo_ecto2no endotherm in life cycle     1212  0.227    
+    ## endo_ecto2plant                          1200  0.190    
+    ## devo_typeoutside host                    1200  0.632    
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
@@ -873,7 +987,7 @@ habitat and in/outside host are conflated, as proportionally more of the
 terrestrial values are outside the host and more of the aquatic values
 are inside the host.
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-85-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-97-1.png)<!-- -->
 
 #### Target host
 
@@ -890,17 +1004,17 @@ not improve the model.
     ##  Thinning interval  = 50
     ##  Sample size  = 1200 
     ## 
-    ##  DIC: -53.85288 
+    ##  DIC: -49.58007 
     ## 
     ##  G-structure:  ~binomial
     ## 
     ##          post.mean l-95% CI u-95% CI eff.samp
-    ## binomial   0.01472 0.003575  0.02879    781.1
+    ## binomial   0.01367 0.002217  0.02686     1006
     ## 
     ##                ~tree_tips
     ## 
     ##           post.mean l-95% CI u-95% CI eff.samp
-    ## tree_tips   0.04864 0.004654   0.1204    696.6
+    ## tree_tips   0.03903 0.002796  0.09519      775
     ## 
     ##                ~idh(stderr_arr):units
     ## 
@@ -910,40 +1024,40 @@ not improve the model.
     ##  R-structure:  ~units
     ## 
     ##       post.mean l-95% CI u-95% CI eff.samp
-    ## units   0.02647   0.0168  0.03652     1200
+    ## units   0.02595  0.01672  0.03672     1200
     ## 
     ##  Location effects: E_Arr ~ mean_ann_temp_cen + dist_zone + habitat_d1 + endo_ecto2 + devo_type3 
     ## 
-    ##                                            post.mean  l-95% CI  u-95% CI
-    ## (Intercept)                                 0.578885  0.309378  0.899163
-    ## mean_ann_temp_cen                          -0.013274 -0.022365 -0.004355
-    ## dist_zonetemperate                         -0.028658 -0.213817  0.145428
-    ## dist_zonesubtropical                        0.122138 -0.120767  0.354022
-    ## dist_zonetropical                           0.156255 -0.101497  0.443630
-    ## dist_zoneglobal                             0.077264 -0.095268  0.253733
-    ## habitat_d1terrestrial                       0.199562  0.002855  0.416542
-    ## endo_ecto2no endotherm in life cycle        0.029043 -0.116238  0.174261
-    ## endo_ecto2plant                            -0.190010 -0.481545  0.110685
-    ## devo_type3in plant                         -0.102088 -0.290680  0.090316
-    ## devo_type3outside host: targets invert      0.110816 -0.049271  0.270621
-    ## devo_type3outside host: targets vertebrate -0.176497 -0.380512  0.014844
-    ##                                            eff.samp  pMCMC    
-    ## (Intercept)                                    1351 <8e-04 ***
-    ## mean_ann_temp_cen                              1200 <8e-04 ***
-    ## dist_zonetemperate                             1200 0.7583    
-    ## dist_zonesubtropical                           1200 0.3267    
-    ## dist_zonetropical                              1200 0.2800    
-    ## dist_zoneglobal                                1200 0.4050    
-    ## habitat_d1terrestrial                          1200 0.0600 .  
-    ## endo_ecto2no endotherm in life cycle           1200 0.7383    
-    ## endo_ecto2plant                                1536 0.2000    
-    ## devo_type3in plant                             1200 0.3167    
-    ## devo_type3outside host: targets invert         1200 0.1783    
-    ## devo_type3outside host: targets vertebrate     1200 0.0667 .  
+    ##                                             post.mean   l-95% CI
+    ## (Intercept)                                 5.964e-01  3.426e-01
+    ## mean_ann_temp_cen                          -1.265e-02 -2.078e-02
+    ## dist_zonetemperate                         -2.625e-02 -1.992e-01
+    ## dist_zonesubtropical                        1.172e-01 -1.451e-01
+    ## dist_zonetropical                           1.436e-01 -1.475e-01
+    ## dist_zoneglobal                             6.098e-02 -9.396e-02
+    ## habitat_d1terrestrial                       1.940e-01 -6.174e-05
+    ## endo_ecto2no endotherm in life cycle        9.115e-03 -1.362e-01
+    ## endo_ecto2plant                            -2.169e-01 -4.965e-01
+    ## devo_type3in plant                         -8.866e-02 -2.797e-01
+    ## devo_type3outside host: targets invert      1.139e-01 -5.200e-02
+    ## devo_type3outside host: targets vertebrate -1.748e-01 -3.577e-01
+    ##                                              u-95% CI eff.samp  pMCMC    
+    ## (Intercept)                                 8.855e-01     1200 <8e-04 ***
+    ## mean_ann_temp_cen                          -3.467e-03     1200 0.0100 ** 
+    ## dist_zonetemperate                          1.337e-01     1200 0.7767    
+    ## dist_zonesubtropical                        3.387e-01     1200 0.3533    
+    ## dist_zonetropical                           4.266e-01     1200 0.3283    
+    ## dist_zoneglobal                             2.356e-01     1200 0.4883    
+    ## habitat_d1terrestrial                       3.916e-01     1056 0.0483 *  
+    ## endo_ecto2no endotherm in life cycle        1.625e-01     1294 0.9267    
+    ## endo_ecto2plant                             6.357e-02     1428 0.1167    
+    ## devo_type3in plant                          1.238e-01     1347 0.3883    
+    ## devo_type3outside host: targets invert      2.734e-01     1049 0.1750    
+    ## devo_type3outside host: targets vertebrate  3.278e-02     1312 0.0867 .  
     ## ---
     ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 
-![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-89-1.png)<!-- -->
+![](06_fit_phylo_models_Arr_Nov4_files/figure-gfm/unnamed-chunk-101-1.png)<!-- -->
 
 # Conclusions
 
@@ -974,18 +1088,18 @@ asterisk, I retained it in the model.
 
 | model                                 | df | df\_used |     DIC |  R2m |  R2c |
 | :------------------------------------ | -: | -------: | ------: | ---: | ---: |
-| just within-species\*                 |  3 |       NA | \-27.72 | 0.00 | 0.54 |
-| \+ phylogeny\*                        |  4 |        1 | \-44.64 | 0.00 | 0.77 |
-| \+ mean annual temp\*                 |  5 |        1 | \-47.27 | 0.02 | 0.76 |
-| \+ min/max temps                      |  7 |        2 | \-52.08 | 0.04 | 0.75 |
-| \+ latitude                           |  6 |      \-1 | \-47.54 | 0.04 | 0.69 |
-| \+ distribution zone\*                |  9 |        3 | \-48.08 | 0.09 | 0.71 |
-| \+ habitat (aquatic vs terrestrial)\* | 10 |        1 | \-49.42 | 0.11 | 0.78 |
-| \+ distribution x habitat interacton  | 13 |        3 | \-47.81 | 0.14 | 0.79 |
-| \+ plant vs animal parasite\*         | 11 |      \-2 | \-49.97 | 0.21 | 0.81 |
-| \+ endotherm in life cycle?\*         | 12 |        1 | \-53.10 | 0.22 | 0.75 |
-| \+ stage in/out of host\*             | 13 |        1 | \-52.04 | 0.19 | 0.77 |
-| \+ target host: invert vs vert        | 15 |        2 | \-53.85 | 0.21 | 0.76 |
+| just within-species\*                 |  3 |       NA | \-22.67 | 0.00 | 0.53 |
+| \+ phylogeny\*                        |  4 |        1 | \-43.99 | 0.00 | 0.70 |
+| \+ mean annual temp\*                 |  5 |        1 | \-47.64 | 0.02 | 0.73 |
+| \+ min/max temps                      |  7 |        2 | \-51.97 | 0.05 | 0.74 |
+| \+ latitude                           |  6 |      \-1 | \-46.99 | 0.05 | 0.73 |
+| \+ distribution zone\*                |  9 |        3 | \-48.28 | 0.08 | 0.72 |
+| \+ habitat (aquatic vs terrestrial)\* | 10 |        1 | \-49.91 | 0.12 | 0.79 |
+| \+ distribution x habitat interacton  | 13 |        3 | \-48.51 | 0.12 | 0.78 |
+| \+ plant vs animal parasite\*         | 11 |      \-2 | \-50.42 | 0.18 | 0.75 |
+| \+ endotherm in life cycle?\*         | 12 |        1 | \-50.82 | 0.23 | 0.74 |
+| \+ stage in/out of host\*             | 13 |        1 | \-49.82 | 0.19 | 0.77 |
+| \+ target host: invert vs vert        | 15 |        2 | \-49.58 | 0.24 | 0.74 |
 
 The most complex model, one that includes phylogeny, seemingly important
 environmental variables, and characteristics of the host-parasite
