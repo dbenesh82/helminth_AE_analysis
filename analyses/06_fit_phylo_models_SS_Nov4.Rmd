@@ -1,7 +1,7 @@
 ---
 title: "Determinants of helminth activation energy (Sharpe-Schoolfield)"
 author: "Dan Benesh"
-date: "November 4, 2019"
+date: "November 15, 2019"
 output: github_document
 ---
 
@@ -30,7 +30,8 @@ dat <- select(dat, tpc_num, Genus, Species, Family, Order, Class, Phylum,
               latitude, altitude_m, author_latitude, habitat, habitat.cat.2,
               distribution, distrib.cat.1,
               mean_ann_temp = bio1, max_month_temp = bio5, min_month_temp = bio6,
-              Stage.in.out.of.host, host.type, hosts..in.order., p_size = parasite.size..units.)
+              Stage.in.out.of.host, host.type, hosts..in.order., p_size = parasite.size..units.,
+              experiment = same_experiment, trait_detail, independent, authors, year)
 ```
 
 # Get data organized
@@ -138,8 +139,94 @@ group_by(dat, se_cat)%>%
 
 Thus, when we weight the data points by the standard error of the activation energies, it should shift the overall mean down.
 
-How many AE estimates per species?
+## Same experiment, different metrics
 
+In some cases, multiple TPCs were fit to data from the same experiment. For example, one curve fit for minimum developmental time and one for maximum developmental time. These are not independent because the same individual parasites contribute to both metrics. In these cases AE measurements should be highly correlated.
+
+```{r}
+dat <- mutate(dat, same_exp = if_else(independent == "1/2 trait detail" | independent == "1/3 trait detail", "yes", "no")) # hopefully, I understood this correctly
+```
+```{r}
+# simplify response metric
+dat <- mutate(dat, trait_detail2 = if_else(trait_detail %in% c("I averaged min & max", "I averaged min and max", "I averaged min and max of range"), "midpoint",
+                                           if_else(trait_detail %in% c("50% (I sumed 2 stages)", "50%"), "50% developed",
+                                                   if_else(trait_detail %in% c("mean", "mean (I summed 2 stages)"), "mean", 
+                                                           if_else(trait_detail == "min ", "min", trait_detail)))))%>%
+  mutate(trait_detail2 = factor(trait_detail2, levels = c("min", "50% developed", "midpoint", "mean", "max", "not specified")))%>%
+  mutate(trait_detail3 = if_else(trait_detail2 %in% c("midpoint", "mean", "50% developed"), "mid", as.character(trait_detail2)))%>%
+  mutate(citation = paste(authors, year))
+```
+
+Let's make a plot for the species with multiple activation energy measurements. When we do this, we see that AE estimates from the same experiment tend to cluster as expected.
+
+```{r}
+mm <- group_by(dat, binomial)%>%
+  summarize(AE = median(E_SS, na.rm = T), n = n())%>%
+  arrange(AE)
+sp_mm <- mm$binomial[which(mm$n>1)] # species with multiple measurements
+```
+```{r}
+ggplot(filter(dat, binomial %in% sp_mm)%>%
+         mutate(bi_o = factor(binomial, levels = sp_mm)),
+       aes(x = bi_o, y = E_SS, color = same_exp)) +
+  geom_point(alpha = 0.5) +
+  coord_flip() +
+  labs(x = "Species", y = "Activation energy (SS)", color = "Same experiment?")
+```
+
+This indicates how these values are not independent. Since this is an issue that only affects a few species, I'm not inclined to devise an `experiment` random effect that accounts for this pseudoreplication statistically. Rather, I would probably only take a single AE per experiment. But which one?
+
+We can zoom in on just these cases where there are multiple measurements from the same experiment. Unlike for [Arrhenius](06_fit_phylo_models_Arr_Nov4.md) activation energies, there was not an obvious bias in how minimum vs max development times impacted activation energy estimates. 
+
+```{r}
+ggplot(filter(dat, binomial %in% sp_mm, same_exp == 'yes')%>%
+         mutate(bi_o = factor(binomial, levels = sp_mm)),
+       aes(x = bi_o, y = E_SS, color = trait_detail2)) +
+  geom_point(alpha = 1) +
+  coord_flip() +
+  labs(x = "Species", y = "Activation energy (SS)", color = "Devo metric")
+```
+
+This is related to the concerns Peter has raised about *apparent* developmental rates, in that development is not measured for all viable worms (ones that die before maturing are excluded). We can examine whether activation energy varies systematically with developmental metric. It does, in that min devo times tend to yield higher AE estimates.
+
+```{r}
+ggplot(dat, aes(y = E_SS, x = trait_detail3)) + 
+  geom_boxplot(outlier.color = NA) +
+  geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.5) +
+  coord_flip() +
+  labs(y = "Activation energy (Arrhenius)") +
+  theme(axis.title.y = element_blank())
+```
+
+Overall, most activation energies were based on mean developmental rates. Thus, in the few cases where multiple TPCs were fit to data from the same experiment, but different metrics, I would only retain the activation energy for mean devo time.
+
+```{r}
+table(dat$trait_detail2)
+```
+
+In some cases, the source of repeated measures on a single species was recorded. For example, if the temperature dependence of multiple parasite populations or life stages was studied. We can also plot these variables in a similar to above. I do not notice an obvious trend. 
+
+```{r}
+# make variable for other sources of variability within species/studies
+dat <- mutate(dat, ind2 = if_else(independent == "1/2 development stage" | independent == "1/3 development stage" | independent == "2/2 development stage", "life stages",
+                                  if_else(independent == "1/2 trait detail" | independent == "1/3 trait detail", "metrics", 
+                                          if_else(independent == "1/2 host" | independent == "1/6 host", "hosts", 
+                                                  if_else(independent == "1/3 populations", "populations", "other"))))) # hopefully, I understood this correctly
+```
+```{r}
+ggplot(filter(dat, binomial %in% sp_mm)%>%
+         mutate(bi_o = factor(binomial, levels = sp_mm)),
+       aes(x = bi_o, y = E_SS, color = ind2)) +
+  geom_point(alpha = 0.5) +
+  coord_flip() +
+  labs(x = "Species", y = "Activation energy (Arrhenius)", color = "Different:")
+```
+
+After removing AEs from the same experiment, how many AE estimates per species?
+
+```{r}
+dat <- filter(dat, !(same_exp == "yes" & trait_detail3 != 'mid'))
+```
 ```{r}
 filter(dat, !is.na(binomial), !is.na(E_SS))%>%
   group_by(binomial)%>%
@@ -304,6 +391,26 @@ ggplot(mutate(dat, ord_A = factor(Order, levels = ord_A$Order)),
 rm(ord_A)
 ```
 
+#### Developmental metric
+
+As seen above, the chosen metric of development can affect activation energy estimates. To check this effect, I added a fixed factor to the model that distinguishes between activation estimates based on mean, min, or unspecific developmental times.
+
+```{r}
+mod1.1 <- MCMCglmm(E_SS ~ trait_detail3, 
+                 random = ~ binomial + tree_tips + idh(stderr_arr):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
+                 nitt=63000, thin = 50,
+                 ginverse = list(tree_tips=Ainv),
+                 family = "gaussian", pr=F, verbose = F)
+```
+
+The differences among these groups were rather minimal (non-significant p-values).
+
+```{r}
+summary(mod1.1)
+```
+
+Thus, it is not clear how valuable this term is in the model. Therefore, I have not included it in further analyses.
 
 ### Environmental variables
 
