@@ -1,0 +1,454 @@
+---
+title: "Taxonomic predictions"
+output: 
+  github_document:
+    toc: true
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ape)
+library(RColorBrewer)
+library(MCMCglmm)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+options(stringsAsFactors = FALSE)
+theme_set(new = theme_bw())
+```
+```{r importdata}
+# focusing only on devo
+ae_devo <- read.csv(file = "../data/200421_ArrDevFits_filter.csv", header = TRUE)
+dat <- read.csv(file = "../data/main_data_rev.csv", header = TRUE)
+tree <- read.tree(file = "../data/full_tree_time_calib.nex")
+```
+```{r}
+dat <- select(dat, tpc_num, binomial = parasite_species, genus, fam = family, order, class, phylum, 
+              trait_type, num_temps = num_temps_in_curve, cause_of_repeated_measures, same_experiment,
+              measurement_metric, simplified_metric,
+              sampling_location_available,
+              mean_ann_temp, max_month_temp, min_month_temp,
+              latitude, altitude_m, author_latitude, dist_zone,
+              habitat,
+              plant_anim_parasite, endotherm_in_cycle, stage_in_out_host, target_host)
+
+ae_devo <- rename(ae_devo, stderr_arr = SE_BA, stderr_ss = SE_SS)
+
+
+dat <- left_join(dat, ae_devo, by = 'tpc_num') # join by temperature preference curve identifier
+
+dat <- mutate(dat, E_comb = if_else(best_mod2 == "SS", E_SS, E_Arr),
+              se_comb = if_else(best_mod2 == "SS", stderr_ss, stderr_arr))
+
+dat <- filter(dat, !is.na(E_comb)) # remove those without Act E
+
+dat <- mutate(dat, global = if_else(dist_zone == 'global', 'global', 'not global'))
+
+dat <- filter(dat, !(same_experiment == "yes" & simplified_metric != 'mid'), !tpc_num %in% c(61)) # remove non-ind data
+
+dat <- mutate(dat, mean_ann_temp_cen = mean_ann_temp - median(mean_ann_temp),
+              max_month_temp_cen = max_month_temp - median(max_month_temp),
+              min_month_temp_cen = min_month_temp - median(min_month_temp))
+
+# make habitat variable easy to understand
+dat <- mutate(dat, habitat_d1 = if_else(habitat == 'terrestrial', 'Terrestrial',
+                                        if_else(habitat == 'freshwater' | habitat == 'marine', 'Aquatic', 'NA')))
+dat$habitat_d1[which(dat$habitat_d1 == "NA")] <- NA
+
+```
+```{r}
+# fix it
+tree$tip.label[which(tree$tip.label == "Meloidogyne_hisanica")] <- "Meloidogyne_hispanica"
+
+spp_not_in_dat <- tree$tip.label[!tree$tip.label %in% dat$binomial] # spp in tree excluded from data
+# spp_not_in_dat
+
+tree_red <- drop.tip(tree, spp_not_in_dat)
+
+dat$tree_tips <- dat$binomial
+```
+
+Number of AE estimates:
+
+```{r}
+sum(!is.na(dat$E_comb))
+```
+
+Number of species: 
+
+```{r}
+n_distinct(dat$binomial)
+```
+
+Here's how many groups there are at each level of the taxonomy
+
+```{r}
+end_tbl <- dat%>%
+  summarise(across(binomial:phylum, n_distinct))%>%
+  pivot_longer(everything(), names_to = "tax_level", values_to = "n")
+end_tbl
+```
+
+Here is AE separated by phylum
+
+```{r}
+fx <- ggplot(dat, aes(x = phylum, y = E_comb)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5, position = position_jitter(width = 0.33)) +
+  labs(x = NULL, y = "Activation energy, eV") +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())
+fx
+# ggsave(fx, filename = "../ms_figs/phyla_comp_rev.png", width = 3.5, height = 3.5)
+```
+
+Fit series models from the root to the the tip of taxonomy, i.e. first phylum, then add order, then class, etc. Taxonomy is a random effect and there are no fixed effects.
+
+```{r}
+# just phyla
+prior_tax1 <- list(G=list(G1=list(V=1,nu=0.002),
+                          G2=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+# + class
+prior_tax2 <- list(G=list(G1=list(V=1,nu=0.002),
+                         G2=list(V=1,nu=0.002),
+                         G3=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+# + order
+prior_tax3 <- list(G=list(G1=list(V=1,nu=0.002),
+                         G2=list(V=1,nu=0.002),
+                         G3=list(V=1,nu=0.002),
+                         G4=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+# + fam
+prior_tax4 <- list(G=list(G1=list(V=1,nu=0.002),
+                         G2=list(V=1,nu=0.002),
+                         G3=list(V=1,nu=0.002),
+                         G4=list(V=1,nu=0.002),
+                         G5=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+# + genus
+prior_tax5 <- list(G=list(G1=list(V=1,nu=0.002),
+                         G2=list(V=1,nu=0.002),
+                         G3=list(V=1,nu=0.002),
+                         G4=list(V=1,nu=0.002),
+                         G5=list(V=1,nu=0.002),
+                         G6=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+# + species
+prior_tax6 <- list(G=list(G1=list(V=1,nu=0.002),
+                         G2=list(V=1,nu=0.002),
+                         G3=list(V=1,nu=0.002),
+                         G4=list(V=1,nu=0.002),
+                         G5=list(V=1,nu=0.002),
+                         G6=list(V=1,nu=0.002),
+                         G7=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+```
+
+```{r}
+mod1_tax <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ phylum +
+                   idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, 
+                 prior = prior_tax1,
+                 nitt=103000, thin = 50,
+                 family = "gaussian", pr=F, verbose = F)
+mod2_tax <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ class + phylum +
+                   idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, 
+                 prior = prior_tax2,
+                 nitt=103000, thin = 50,
+                 family = "gaussian", pr=F, verbose = F)
+mod3_tax <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ order + class + phylum +
+                   idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, 
+                 prior = prior_tax3,
+                 nitt=103000, thin = 50,
+                 family = "gaussian", pr=F, verbose = F)
+mod4_tax <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ fam + order + class + phylum +
+                   idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, 
+                 prior = prior_tax4,
+                 nitt=103000, thin = 50,
+                 family = "gaussian", pr=F, verbose = F)
+mod5_tax <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ genus + fam + order + class + phylum +
+                   idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, 
+                 prior = prior_tax5,
+                 nitt=103000, thin = 50,
+                 family = "gaussian", pr=F, verbose = F)
+mod6_tax <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ binomial + genus + fam + order + class + phylum +
+                   idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, 
+                 prior = prior_tax6,
+                 nitt=103000, thin = 50,
+                 family = "gaussian", pr=F, verbose = F)
+```
+
+From these models, we calculate the variance explained by each new taxonomic level.
+
+```{r}
+# the series of models fit
+mod_series <- c("phylum", "class", "order", "fam", "genus", "binomial")
+
+# loop through models, calculate R2
+i <- 0
+if(exists("r2c")){rm(r2c)}
+if(exists("r2m")){rm(r2m)}
+
+for(m in list(mod1_tax, mod2_tax, mod3_tax, mod4_tax, mod5_tax, mod6_tax)){
+
+  # calculate fixed effects var
+  fixVar <- numeric(length(m$Sol[,1]))
+  for(j in 1:length(m$Sol[,1])){
+    fixVar_j <- var(as.vector(m$Sol[j,] %*% t(m$X)))
+    fixVar[j] <- fixVar_j
+  }
+  
+  # random effects var
+  resi <- which(colnames(m$VCV) %in% c('units')) # remove resid variance from variance components
+  randVar <- m$VCV[,-resi]
+  if(!is.null(colnames(randVar))){ # if only one random effect, it is unnamed and can't use rowSums
+    randVar <- rowSums(randVar)-1
+    }
+  
+  # resid var
+  resVar <- m$VCV[,'units']
+  
+  # calculate R2
+  r2m <- (fixVar)/(fixVar + randVar + resVar)
+  r2c <- (fixVar + randVar)/(fixVar + randVar + resVar)
+  cim <- HPDinterval(r2m)
+  cic <- HPDinterval(r2c)
+  
+  if(i == 0){
+    r2m_o <- posterior.mode(r2m)
+    r2m_l <- cim[1]
+    r2m_u <- cim[2]
+    r2c_o <- posterior.mode(r2c)
+    r2c_l <- cic[1]
+    r2c_u <- cic[2]
+  } else {
+    r2m_o <- c(r2m_o, posterior.mode(r2m))
+    r2m_l <- c(r2m_l, cim[1]) 
+    r2m_u <- c(r2m_u, cim[2])
+    r2c_o <- c(r2c_o, posterior.mode(r2c))
+    r2c_l <- c(r2c_l, cic[1]) 
+    r2c_u <- c(r2c_u, cic[2])
+  }
+  i <- i + 1
+}
+```
+
+And then plot them to see how each taxonomic level explains additional variation in AE
+
+```{r}
+end_tbl2 <- data.frame(model = mod_series, r2c_lwr = r2c_l, r2c = r2c_o, r2c_upr = r2c_u)
+end_tbl <- left_join(end_tbl, end_tbl2, by = c("tax_level" = "model"))
+```
+```{r}
+end_tbl <- end_tbl%>%
+  arrange(r2c)%>%
+  mutate(tax_level = if_else(tax_level=="binomial", "species", 
+                             if_else(tax_level == "fam", "family", tax_level)))%>%
+  mutate(lab = paste0(tax_level, "\n(", as.character(n),")"))
+end_tbl <- end_tbl%>%
+  mutate(labx = factor(lab, levels = end_tbl$lab),
+         group = "group")
+```
+```{r}
+fx <- ggplot(end_tbl, aes(x = labx, y = r2c)) +
+  geom_line(aes(group=group), linetype = "dashed") +
+  geom_pointrange(aes(x = labx, ymin = r2c_lwr, ymax = r2c_upr), fill = "gray70") +
+  labs(y = "Proportion variation explained", x = NULL) +
+  scale_y_continuous(limits = c(0,1)) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()
+        )
+fx
+```
+
+```{r}
+# ggsave(fx, filename = "../ms_figs/Figs_tax_levs.png", units = "in", width = 4, height = 3)
+```
+
+
+It looks like orders and families are most important.
+
+```{r}
+# end_tbl%>%
+#   mutate(r2_delt = r2c - lag(r2c))
+```
+
+
+```{r}
+prior_tax <- list(G=list(G1=list(V=1,nu=0.002),
+                         G2=list(V=1,nu=0.002),
+                         G3=list(V=1,nu=0.002),
+                         G4=list(V=1,nu=0.002),
+                         G5=list(V=1,nu=0.002),
+                         G6=list(V=1,nu=0.002),
+                         G7=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+```
+
+```{r}
+mod1_tax <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ binomial + genus + fam + order + class + phylum +
+                   idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, 
+                 prior = prior_tax,
+                 nitt=103000, thin = 50,
+                 family = "gaussian", pr=T, verbose = F)
+```
+
+```{r}
+summary(mod1_tax)
+```
+Here is the percent variation explained by each taxonomic level in the full model. Family is most important.
+
+```{r}
+rv <- rowSums(mod1_tax$VCV[,!colnames(mod1_tax$VCV) %in% c("se_comb.units", "units")])
+s0 <- summary(mod1_tax$VCV[,"phylum"]/(rv + mod1_tax$VCV[,"units"]))
+s1 <- summary(mod1_tax$VCV[,"class"]/(rv + mod1_tax$VCV[,"units"]))
+s2 <- summary(mod1_tax$VCV[,"order"]/(rv + mod1_tax$VCV[,"units"]))
+s3 <- summary(mod1_tax$VCV[,"fam"]/(rv + mod1_tax$VCV[,"units"]))
+s4 <- summary(mod1_tax$VCV[,"genus"]/(rv + mod1_tax$VCV[,"units"]))
+
+f_tbl <- data.frame(level = c("phylum", "class", "order", "family", "genus"),
+                    lwr = c(s0$quantiles[1], s1$quantiles[1], s2$quantiles[1], s3$quantiles[1], s4$quantiles[1]),
+                    fit = c(s0$quantiles[3], s1$quantiles[3], s2$quantiles[3], s3$quantiles[3], s4$quantiles[3]),
+                    upr = c(s0$quantiles[5], s1$quantiles[5], s2$quantiles[5], s3$quantiles[5], s4$quantiles[5])
+                    )
+f_tbl
+```
+
+
+```{r}
+med_overall <- median(mod1_tax$Sol[,1])
+```
+
+Here are predicted values for families (genus and within-species effects marginalized)
+
+```{r}
+preds <- predict.MCMCglmm(mod1_tax, marginal = ~ binomial + genus, interval = "confidence")
+preds <- data.frame(preds)
+names(preds) <- c("ae_fit", "ae.lwr", "ae.upr")
+
+dat_p <- bind_cols(dat, preds)
+```
+```{r}
+fam_p <- dat_p%>%
+  group_by(fam)%>%
+  summarise(n = n(),
+            fit = round(median(ae_fit),2),
+            fit.lwr = round(median(ae.lwr),2),
+            fit.upr = round(median(ae.upr),2),
+            sd_fit = round(sd(ae_fit),3))%>%
+  arrange(desc(n), fit)
+fam_p
+```
+
+```{r}
+fam_px <- arrange(fam_p, fit)%>%
+  mutate(famx = paste0(fam, " (", as.character(n),")" ))
+fam_px <- mutate(fam_px, famx = factor(famx, levels = fam_px$famx))
+fam_px <- left_join(
+  fam_px, select(dat_p, fam, phylum)%>%distinct()
+)
+
+fs2 <- ggplot(fam_px, aes(x = famx, y = fit, color = phylum)) +
+  geom_pointrange(aes(ymin = fit.lwr, ymax = fit.upr)) +
+  geom_hline(yintercept = med_overall, linetype = "dashed") +
+  coord_flip() +
+  labs(y = "Activation energy", x = NULL) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(), 
+        legend.title = element_blank(),
+        legend.background = element_rect(color = 'black'),
+        legend.position = c(0.15, 0.85),
+        legend.justification = c(0.5,0.5)
+        )
+fs2
+```
+
+Here are predicted values for orders (family, genus and within-species effects marginalized)
+
+```{r}
+preds <- predict.MCMCglmm(mod1_tax, marginal = ~ binomial + genus + fam, interval = "confidence")
+preds <- data.frame(preds)
+names(preds) <- c("ae_fit", "ae.lwr", "ae.upr")
+
+dat_p <- bind_cols(dat, preds)
+```
+```{r}
+ord_p <- dat_p%>%
+  group_by(order)%>%
+  summarise(n = n(),
+            fit = median(ae_fit),
+            fit.lwr = median(ae.lwr),
+            fit.upr = median(ae.upr),
+            sd_fit = round(sd(ae_fit),3))%>%
+  arrange(desc(n), fit)
+```
+
+```{r}
+ord_px <- arrange(ord_p, fit)%>%
+  mutate(ordx = paste0(order, " (", as.character(n),")" ))
+ord_px <- mutate(ord_px, ordx = factor(ordx, levels = ord_px$ordx))
+ord_px <- left_join(
+  ord_px, select(dat_p, order, phylum)%>%distinct()
+)
+
+fs2b <- ggplot(ord_px, aes(x = ordx, y = fit, color = phylum)) +
+  geom_pointrange(aes(ymin = fit.lwr, ymax = fit.upr)) +
+  geom_hline(yintercept = med_overall, linetype = "dashed") +
+  coord_flip() +
+  labs(y = "Activation energy", x = NULL) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(), 
+        legend.title = element_blank(),
+        legend.background = element_rect(color = 'black'),
+        legend.position = c(0.1, 0.85),
+        legend.justification = c(0.5,0.5)
+        )
+fs2b
+```
+
+
+
+```{r}
+library(cowplot)
+```
+
+```{r}
+fs2x <- fs2 + 
+  scale_y_continuous(limits = c(0.24, 1.2)) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())
+
+fs2y <- fs2b +
+  guides(color = F) +
+  scale_y_continuous(limits = c(0.24, 1.2)) 
+```
+
+```{r}
+fs2_comb <- plot_grid(fs2x, fs2y, 
+                      ncol = 1, 
+                      # rel_heights = c(length(fam_px$fam)/length(ord_px$order), 1),
+                      rel_heights = c(1.9, 1))
+fs2_comb
+```
+
+
+```{r}
+# ggsave(fs2_comb, filename = "../ms_figs/Figs2.png")
+```
+
