@@ -1,0 +1,158 @@
+---
+title: "Figure 1"
+author: "Dan Benesh"
+date: "1/9/2020"
+output: html_document
+---
+
+This notebook creates Fig 1 in the manuscript and it also includes some descriptive stats cited in the first section of the results.
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(RColorBrewer)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+options(stringsAsFactors = FALSE)
+theme_set(new = theme_bw())
+```
+```{r importdata}
+# focusing only on devo
+ae_devo <- read.csv(file = "../data/200421_ArrDevFits_filter.csv", header = TRUE)
+dat <- read.csv(file = "../data/main_data_rev.csv", header = TRUE)
+```
+```{r}
+dat <- select(dat, tpc_num, binomial = parasite_species, genus, fam = family, order, class, phylum, 
+              trait_type, num_temps = num_temps_in_curve, cause_of_repeated_measures, same_experiment,
+              measurement_metric, simplified_metric,
+              sampling_location_available,
+              mean_ann_temp, max_month_temp, min_month_temp,
+              latitude, altitude_m, author_latitude, dist_zone,
+              habitat,
+              plant_anim_parasite, endotherm_in_cycle, stage_in_out_host, target_host)
+```
+```{r}
+ae_devo <- rename(ae_devo, stderr_arr = SE_BA, stderr_ss = SE_SS)
+```
+```{r}
+dat <- left_join(dat, ae_devo, by = 'tpc_num') # join by temperature preference curve identifier
+dat <- filter(dat, !is.na(E_Arr)) # remove those without Act E
+```
+```{r}
+dat <- mutate(dat, E_comb = if_else(best_mod2 == "SS", E_SS, E_Arr),
+              se_comb = if_else(best_mod2 == "SS", stderr_ss, stderr_arr))
+```
+
+Number of AE estimates:
+
+```{r}
+sum(!is.na(dat$E_comb))
+```
+
+Number after removing pseudoreplicates:
+
+```{r}
+dat <- filter(dat, !(same_experiment == "yes" & simplified_metric != 'mid'), !tpc_num %in% c(61)) # remove non-ind data
+sum(!is.na(dat$E_comb))
+```
+
+Number of species:
+
+```{r}
+n_distinct(dat$binomial)
+```
+
+Number of temps in thermal performance curves
+
+```{r}
+summary(dat$num_temps)
+```
+
+Median AE estimated by 'best' value
+
+```{r}
+m3 <- summarize(dat, 
+                q25 = quantile(E_comb, probs = 0.25), 
+                med_AE = median(E_comb), 
+                q75 = quantile(E_comb, probs = 0.75), 
+                n = n(),
+                mean_AE = mean(E_comb), 
+                skew = e1071::skewness(E_comb),
+                kurtosis = e1071::kurtosis(E_comb))
+m3
+```
+
+Median AE for curves where Arrenhius was best model:
+
+```{r}
+filter(dat, best_mod2 == "BA")%>%
+   summarize(q25 = quantile(E_comb, probs = 0.25), 
+             med_AE = median(E_comb), 
+             q75 = quantile(E_comb, probs = 0.75), 
+             n = n(),
+             mean_AE = mean(E_comb), 
+             skew = e1071::skewness(E_comb),
+             kurtosis = e1071::kurtosis(E_comb))
+```
+Median AE for curves where SS was best model:
+
+```{r}
+filter(dat, best_mod2 == "SS")%>%
+  summarize(q25 = quantile(E_comb, probs = 0.25), 
+            med_AE = median(E_comb), 
+            q75 = quantile(E_comb, probs = 0.75), 
+            n = n(),
+            mean_AE = mean(E_comb), 
+            skew = e1071::skewness(E_comb),
+            kurtosis = e1071::kurtosis(E_comb))
+```
+
+Figure 1
+
+```{r}
+tg <- ggplot(dat%>%
+               mutate(best_mod2 = fct_relevel(best_mod2, c("SS", "BA"))),
+                      aes(x = E_comb)) +
+  geom_histogram(aes(fill = best_mod2),
+                 binwidth = 0.1, color = 'black', 
+                 # fill = 'lightgray'
+                 ) +
+  geom_segment(data = m3, aes(x = med_AE, xend = med_AE, y = 3, yend = 0.3),
+               color = 'red', linetype = 'solid', size = 2,
+               arrow = arrow(length = unit(0.03, "npc"), type = 'closed')) + # highlight median value
+  labs(x = "Activation energy (eV)", y = "Count", fill = NULL) +
+  theme(panel.grid.minor = element_blank(),
+        legend.background = element_rect(color = "black"),
+        legend.position = c(0.95,0.95),
+        legend.justification = c(1,1)) +
+  scale_fill_manual(values = c("darkgray", "lightgray")) +
+  scale_y_continuous(expand = expand_scale(add = c(0,1)))
+tg
+```
+```{r}
+tg2 <- ggplot(dat%>%
+               mutate(best_mod2 = fct_relevel(best_mod2, c("SS", "BA"))),
+                      aes(x = E_comb)) +
+  geom_density(aes(E_comb, after_stat(count)),
+               bw = 0.1, adjust = 1,
+               alpha = 0.1) +
+  labs(x = "Activation energy (eV)", y = "Count", fill = NULL) +
+  theme(panel.grid.minor = element_blank(),
+        legend.background = element_rect(color = "black"),
+        legend.position = c(0.95,0.95),
+        legend.justification = c(1,1)) +
+  scale_fill_manual(values = c("darkgray", "lightgray")) +
+  scale_y_continuous(expand = expand_scale(add = c(0,1)))
+tg2
+```
+
+I like it better together, so let's export a reasonable looking file
+
+```{r}
+fig_w <- 4.5
+fig_h <- 4
+```
+```{r}
+ggsave(tg, filename = "../ms_figs/Fig1.svg", width = fig_w, height = fig_h, units = 'in')
+ggsave(tg2, filename = "../ms_figs/Fig1_density.svg", width = fig_w, height = fig_h, units = 'in')
+# ggsave(tg, filename = "../ms_figs/Fig1.svg", width = fig_w, height = fig_h, units = 'in')
+```
+

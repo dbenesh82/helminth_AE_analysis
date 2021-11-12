@@ -1,0 +1,148 @@
+---
+title: "Figure S1"
+output: html_document
+---
+
+This notebook creates Fig S1.
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+library(MCMCglmm)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+options(stringsAsFactors = FALSE)
+theme_set(new = theme_bw())
+```
+```{r importdata}
+# focusing only on devo
+ae_devo <- read.csv(file = "../data/200421_ArrDevFits_filter.csv", header = TRUE)
+dat <- read.csv(file = "../data/main_data_rev.csv", header = TRUE)
+tree <- read.tree(file = "../data/full_tree_time_calib.nex")
+```
+```{r}
+dat <- select(dat, authors, year, tpc_num, binomial = parasite_species, genus, fam = family, order, class, phylum, 
+              trait_type, num_temps = num_temps_in_curve, cause_of_repeated_measures, same_experiment,
+              measurement_metric, simplified_metric,
+              sampling_location_available,
+              mean_ann_temp, max_month_temp, min_month_temp,
+              latitude, altitude_m, author_latitude, dist_zone,
+              habitat,
+              plant_anim_parasite, endotherm_in_cycle, stage_in_out_host, target_host)
+```
+```{r}
+ae_devo <- rename(ae_devo, stderr_arr = SE_BA, stderr_ss = SE_SS)
+```
+```{r}
+dat <- left_join(dat, ae_devo, by = 'tpc_num') # join by temperature preference curve identifier
+dat <- filter(dat, !is.na(E_Arr)) # remove those without Act E
+```
+```{r}
+dat <- mutate(dat, E_comb = if_else(best_mod2 == "SS", E_SS, E_Arr),
+              se_comb = if_else(best_mod2 == "SS", stderr_ss, stderr_arr))
+dat <- mutate(dat, global = if_else(dist_zone == 'global', 'global', 'not global'))
+```
+```{r}
+# fix it
+tree$tip.label[which(tree$tip.label == "Meloidogyne_hisanica")] <- "Meloidogyne_hispanica"
+```
+
+```{r}
+spp_not_in_dat <- tree$tip.label[!tree$tip.label %in% dat$binomial] # spp in tree excluded from data
+# spp_not_in_dat
+```
+```{r}
+tree_red <- drop.tip(tree, spp_not_in_dat)
+```
+```{r}
+dat$tree_tips <- dat$binomial
+```
+```{r}
+dat <- mutate(dat, mean_ann_temp_cen = mean_ann_temp - median(mean_ann_temp),
+              max_month_temp_cen = max_month_temp - median(max_month_temp),
+              min_month_temp_cen = min_month_temp - median(min_month_temp))
+```
+```{r}
+# make habitat variable easy to understand
+dat <- mutate(dat, habitat_d1 = if_else(habitat == 'terrestrial', 'Terrestrial',
+                                        if_else(habitat == 'freshwater' | habitat == 'marine', 'Aquatic', 'NA')))
+dat$habitat_d1[which(dat$habitat_d1 == "NA")] <- NA
+
+# sum(is.na(dat$habitat_d))
+```
+```{r}
+dat <- dat%>%mutate(endo_ecto2 = if_else(plant_anim_parasite == "plant", "plant", endotherm_in_cycle))
+```
+```{r}
+dat <- mutate(dat, binomial = gsub(pattern = "_", " ", binomial),
+              study = paste(authors, year))
+```
+
+
+
+```{r}
+mm <- group_by(dat, binomial)%>%
+  summarize(AE = median(E_comb, na.rm = T), n = n())%>%
+  arrange(AE)
+sp_mm <- mm$binomial[which(mm$n>1)] # species with multiple measurements
+```
+```{r}
+dx <- filter(dat, binomial %in% sp_mm, same_experiment == 'yes')%>%
+  select(binomial, study, simplified_metric, E_comb)%>%
+  pivot_wider(names_from = simplified_metric, values_from = E_comb)%>%
+  mutate(range = max-min)
+dx <- dx%>%
+  arrange(mid)
+dxx <- data.frame(study = unique(dx$study), obs = 1:n_distinct(dx$study))
+
+dx <- left_join(dx, dxx)%>%
+  mutate(bi_o = paste0(binomial, " [", obs, "]"))
+sp_mx <- dx$bi_o
+```
+
+Here is the difference in AE between median and minimum metrics:
+
+```{r}
+summary(dx$mid - dx$min)
+```
+Here is the difference in AE between median and maximum metrics:
+
+```{r}
+summary(dx$mid - dx$max)
+```
+
+```{r}
+dx <- dx%>%
+  pivot_longer(cols = mid:min, names_to = "simplified_metric", values_to = "E_comb")
+dx <- dx%>%
+  mutate(bi_o = factor(bi_o, levels = sp_mx))
+```
+
+
+```{r}
+s1 <- ggplot(dx,
+       aes(x = bi_o, y = E_comb, shape = simplified_metric)) +
+  geom_point(alpha = 0.5) +
+  coord_flip() +
+  scale_shape_discrete(labels = c("max", "median", "min")) +
+  labs(x = NULL, y = "Activation energy", shape = "Metric") +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.text.y = element_text(face = 'italic', size = 8))
+s1
+```
+The numbers next to species names refer to these studies:
+```{r}
+select(dx, bi_o, study)%>%distinct()
+```
+
+
+```{r}
+fig_w <- 6
+fig_h <- 4
+```
+```{r}
+ggsave(s1, filename = "../ms_figs/FigS1.png", width = fig_w, height = fig_h, units = 'in')
+```
+

@@ -1,0 +1,529 @@
+---
+title: "Figure 3"
+output: html_document
+---
+
+This notebook creates Fig 3, which combines the env var figs
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+library(MCMCglmm)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+options(stringsAsFactors = FALSE)
+theme_set(new = theme_bw())
+```
+```{r importdata}
+# focusing only on devo
+ae_devo <- read.csv(file = "../data/200421_ArrDevFits_filter.csv", header = TRUE)
+dat <- read.csv(file = "../data/main_data_rev.csv", header = TRUE)
+tree <- read.tree(file = "../data/full_tree_time_calib.nex")
+```
+```{r}
+dat <- select(dat, tpc_num, binomial = parasite_species, genus, fam = family, order, class, phylum, 
+              trait_type, num_temps = num_temps_in_curve, cause_of_repeated_measures, same_experiment,
+              measurement_metric, simplified_metric,
+              sampling_location_available,
+              mean_ann_temp, max_month_temp, min_month_temp,
+              latitude, altitude_m, author_latitude, dist_zone,
+              habitat,
+              plant_anim_parasite, endotherm_in_cycle, stage_in_out_host, target_host)
+```
+```{r}
+ae_devo <- rename(ae_devo, stderr_arr = SE_BA, stderr_ss = SE_SS)
+```
+```{r}
+dat <- left_join(dat, ae_devo, by = 'tpc_num') # join by temperature preference curve identifier
+dat <- filter(dat, !is.na(E_Arr)) # remove those without Act E
+```
+```{r}
+dat <- mutate(dat, E_comb = if_else(best_mod2 == "SS", E_SS, E_Arr),
+              se_comb = if_else(best_mod2 == "SS", stderr_ss, stderr_arr))
+dat <- mutate(dat, global = if_else(dist_zone == 'global', 'global', 'not global'))
+```
+```{r}
+dat <- filter(dat, !(same_experiment == "yes" & simplified_metric != 'mid'), !tpc_num %in% c(61)) # remove non-ind data
+```
+```{r}
+# fix it
+tree$tip.label[which(tree$tip.label == "Meloidogyne_hisanica")] <- "Meloidogyne_hispanica"
+```
+
+```{r}
+spp_not_in_dat <- tree$tip.label[!tree$tip.label %in% dat$binomial] # spp in tree excluded from data
+# spp_not_in_dat
+```
+```{r}
+tree_red <- drop.tip(tree, spp_not_in_dat)
+```
+```{r}
+dat$tree_tips <- dat$binomial
+```
+```{r}
+dat <- mutate(dat, mean_ann_temp_cen = mean_ann_temp - median(mean_ann_temp),
+              max_month_temp_cen = max_month_temp - median(max_month_temp),
+              min_month_temp_cen = min_month_temp - median(min_month_temp))
+```
+```{r}
+# make habitat variable easy to understand
+dat <- mutate(dat, habitat_d1 = if_else(habitat == 'terrestrial', 'Terrestrial',
+                                        if_else(habitat == 'freshwater' | habitat == 'marine', 'Aquatic', 'NA')))
+dat$habitat_d1[which(dat$habitat_d1 == "NA")] <- NA
+
+# sum(is.na(dat$habitat_d))
+```
+```{r}
+dat <- mutate(dat, lat_abs = if_else(latitude == ".", abs(as.integer(author_latitude)), abs(as.integer(latitude))),
+              range_temp = max_month_temp - min_month_temp,
+              habitat_cen = if_else(habitat_d1 == "Terrestrial", 0.5, -0.5))%>%
+  mutate(lat_abs_cen = lat_abs - median(lat_abs), 
+         range_temp_cen = range_temp - median(range_temp))
+```
+
+First, we'll make a plot for temperature. To put confidence/credible bands on the plot, we need to refit the model and then extract credible intervals. The model includes worm phylogeny, weights, and four environmental covariates (temperature, temperature range, latitude, and habitat).
+
+```{r}
+# new data for preds
+p <- bind_rows(
+  data.frame(binomial = dat$binomial[1], 
+             tree_tips = dat$tree_tips[1],
+             se_comb = quantile(dat$se_comb, probs = 0.05),
+             mean_ann_temp_cen = seq(min(dat$mean_ann_temp_cen)-1,
+                                 max(dat$mean_ann_temp_cen)+1,length.out = 50),
+             lat_abs_cen = 0,
+             range_temp_cen = 0,
+             habitat_cen = 0,
+             pred = "yes temp"),
+  data.frame(binomial = dat$binomial[1], 
+             tree_tips = dat$tree_tips[1],
+             se_comb = quantile(dat$se_comb, probs = 0.05),
+             mean_ann_temp_cen = 0,
+             lat_abs_cen = 0, 
+             range_temp_cen = seq(min(dat$range_temp_cen)-1,
+                                 max(dat$range_temp_cen)+1,length.out = 50),
+             habitat_cen = 0,
+             pred = "yes temp range"),
+  data.frame(binomial = dat$binomial[1], 
+             tree_tips = dat$tree_tips[1],
+             se_comb = quantile(dat$se_comb, probs = 0.05),
+             mean_ann_temp_cen = 0,
+             lat_abs_cen = seq(min(dat$lat_abs_cen)-1,
+                               max(dat$lat_abs_cen)+1,length.out = 50), # CHANGE!
+             range_temp_cen = 0,
+             habitat_cen = 0,
+             pred = "yes latitude"),
+  data.frame(binomial = dat$binomial[1], 
+             tree_tips = dat$tree_tips[1],
+             se_comb = quantile(dat$se_comb, probs = 0.05),
+             mean_ann_temp_cen = 0,
+             lat_abs_cen = 0,
+             range_temp_cen = 0,
+             habitat_cen = c(-0.5, 0.5), habitat_d1 = c("Aquatic", "Terrestrial"),
+             pred = "yes habitat")
+  )
+dat_p <- dat
+dat_p$pred <- "no"
+dat_p <- bind_rows(dat_p,p)
+```
+
+```{r}
+tree_red2 <- makeNodeLabel(tree_red) # standardize node labels
+Ainv <- inverseA(tree_red2)$Ainv # make inv of phy cov matrix
+```
+```{r}
+prior2<-list(G=list(G1=list(V=1,nu=0.002),
+                    G2=list(V=1,nu=0.002),
+                    G3=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+```
+```{r}
+# just mod with temp
+mod4 <- MCMCglmm(E_comb ~ mean_ann_temp_cen + lat_abs_cen + range_temp_cen + habitat_cen, 
+                 random = ~ binomial + tree_tips + idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat_p, prior = prior2,
+                 nitt=243000, thin = 50,
+                 ginverse = list(tree_tips=Ainv),
+                 family = "gaussian", pr=F, verbose = F)
+```
+
+```{r}
+# get predicted values
+pdx <- mod4$X # model matrix, just fixed effx
+l <- dim(pdx)[1] # number of data points in model
+pdx <- pdx[(length(dat$binomial)+1):l,] # restrict to only points where we want preds
+num_fe <- mod4$Fixed$nfl # number of fixed effx
+
+# predicted values via matrix multiplication, no taxonomic effx
+p_all <- as.matrix(pdx) %*% t(mod4$Sol[,1:num_fe])
+# add mean temp to preds, and the make it long
+p_all_med <- apply(p_all, MARGIN = 1, median)
+p_all_lwr <- apply(p_all, MARGIN = 1, function(x) {quantile(x, probs = 0.025)})
+p_all_upr <- apply(p_all, MARGIN = 1, function(x) {quantile(x, probs = 0.975)})
+
+p_all2 <- filter(dat_p, pred != "no")%>%
+  mutate(fit = p_all_med,
+         upr = p_all_upr,
+         lwr = p_all_lwr)
+```
+
+Here is the summary of the model used to plot relationships and CIs:
+
+```{r}
+summary(mod4)
+```
+
+
+## Temperature
+
+Here is the plot for mean annual temperature.
+
+```{r}
+tg <- ggplot(dat, 
+             aes(x = mean_ann_temp, y = E_comb)) +
+  geom_ribbon(data = filter(p_all2, pred == "yes temp"),
+            aes(x = mean_ann_temp_cen + median(dat$mean_ann_temp),
+                y = fit, ymin = lwr, ymax = upr),
+            alpha = 0.7, fill = 'lightgrey') +
+  geom_line(data = filter(p_all2, pred == "yes temp"),
+            aes(x = mean_ann_temp_cen + median(dat$mean_ann_temp), 
+                y = fit),
+            size = 1.5) +
+  geom_point(alpha = 0.4, aes(size = 1/se_comb)) +
+  scale_y_continuous(breaks = seq(0, 1.5, 0.25)) +
+  coord_cartesian(ylim = c(0, 1.5)) +
+  labs(x = "Mean annual temperature (°C)", y = "Activation energy") +
+  guides(size = F) +
+  theme(panel.grid.minor = element_blank())
+tg
+```
+Here is the slope of the line.
+
+```{r}
+summary(mod4$Sol[,"mean_ann_temp_cen"])
+```
+We could also express this as q10, the ratio of rates separated by 10 C. Here is the q10 for 0 and 10 C.
+
+```{r}
+r1 <- mod4$Sol[,"(Intercept)"] + mod4$Sol[,"mean_ann_temp_cen"] * (0 - median(dat$mean_ann_temp))
+r2 <- mod4$Sol[,"(Intercept)"] + mod4$Sol[,"mean_ann_temp_cen"] * (10 - median(dat$mean_ann_temp))
+q10 <- (r2/r1)^(10/(10-0))
+summary(q10)
+```
+Here is the q10 for 10 to 20
+
+```{r}
+r1 <- mod4$Sol[,"(Intercept)"] + mod4$Sol[,"mean_ann_temp_cen"] * (10 - median(dat$mean_ann_temp))
+r2 <- mod4$Sol[,"(Intercept)"] + mod4$Sol[,"mean_ann_temp_cen"] * (20 - median(dat$mean_ann_temp))
+q10 <- (r2/r1)^(10/(20-10))
+summary(q10)
+```
+## Temperature range
+
+Now we'll make the same plot but for temperature range.
+
+```{r}
+tg2 <- ggplot(dat, 
+             aes(x = range_temp, y = E_comb)) +
+  geom_ribbon(data = filter(p_all2, pred == "yes temp range"),
+            aes(x = range_temp_cen + median(dat$range_temp),
+                y = fit, ymin = lwr, ymax = upr),
+            alpha = 0.7, fill = 'lightgrey') +
+  geom_line(data = filter(p_all2, pred == "yes temp range"),
+            aes(x = range_temp_cen + median(dat$range_temp), 
+                y = fit),
+            size = 1.5) +
+  geom_point(alpha = 0.4, aes(size = 1/se_comb)) +
+  scale_y_continuous(breaks = seq(0, 1.5, 0.25)) +
+  coord_cartesian(ylim = c(0, 1.5)) +
+  labs(x = "Range in monthly mean temperatures (°C)", y = "Activation Energy") +
+  guides(size = F) +
+  theme(panel.grid.minor = element_blank())
+tg2
+```
+It is very flat. Here is the slope.
+
+```{r}
+summary(mod4$Sol[,"range_temp_cen"])
+```
+## Latitude
+
+Same plot for latitude
+
+```{r}
+tg3 <- ggplot(dat, 
+             aes(x = lat_abs, y = E_comb)) +
+  geom_ribbon(data = filter(p_all2, pred == "yes latitude"),
+            aes(x = lat_abs_cen + median(dat$lat_abs),
+                y = fit, ymin = lwr, ymax = upr),
+            alpha = 0.7, fill = 'lightgrey') +
+  geom_line(data = filter(p_all2, pred == "yes latitude"),
+            aes(x = lat_abs_cen + median(dat$lat_abs), 
+                y = fit),
+            size = 1.5) +
+  geom_point(alpha = 0.4, aes(size = 1/se_comb)) +
+  scale_y_continuous(breaks = seq(0, 1.5, 0.25)) +
+  coord_cartesian(ylim = c(0, 1.5)) +
+  labs(x = "Latitude (° N or S)", y = "Activation energy") +
+  guides(size = F) +
+  theme(panel.grid.minor = element_blank())
+tg3
+```
+
+It is negative. Here is the slope - it was similar to that in the final model. The confidence interval overlaps zero.
+
+```{r}
+summary(mod4$Sol[,"lat_abs_cen"])
+```
+## Habitat
+
+Finally for habitat we plot bars instead of regression lines.
+
+```{r}
+tg4 <- ggplot(dat, 
+              aes(x = habitat_d1, y = E_comb)) +
+  # geom_boxplot() +
+  geom_crossbar(data = filter(p_all2, pred == "yes habitat"),
+                aes(x = habitat_d1, y = fit, ymin = lwr, ymax = upr),
+                alpha = 0.7, fill = 'lightgrey',
+                width = 0.3, fatten = 5) +
+  geom_point(aes(size = 1/se_comb),
+             position = position_jitter(width = 0.3),
+             alpha = 0.4) +
+  scale_y_continuous(breaks = seq(0, 1.5, 0.25)) +
+  coord_cartesian(ylim = c(0, 1.5)) +
+  labs(x = "Habitat type", y = "Activation energy") +
+  guides(size = F) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())  
+tg4
+```
+Here is parameter estimate:
+
+```{r}
+summary(mod4$Sol[,"habitat_cen"])
+```
+```{r}
+summary(mod4)
+```
+
+Here is the estimated difference:
+
+```{r}
+filter(p_all2, pred == "yes habitat")%>%
+  select(habitat_cen, habitat_d1, lwr, fit, upr)
+```
+```{r}
+0.84-0.62
+```
+
+Here is the difference in the covariates between habitats:
+
+```{r}
+dat%>%
+  group_by(habitat_d1)%>%
+  summarize(mean_ann_temp_cen = median(mean_ann_temp_cen),
+            range_temp_cen = median(range_temp_cen),
+            lat_abs_cen = median(lat_abs_cen))
+```
+
+Since habitats differ in some covariates, we can also check the difference without controlling for other environmental variables.
+
+```{r}
+# new data for preds
+p <- data.frame(binomial = dat$binomial[1], 
+                tree_tips = dat$tree_tips[1],
+                se_comb = quantile(dat$se_comb, probs = 0.05),
+                habitat_d1 = unique(dat$habitat_d1),
+                pred = "yes")
+
+dat_p <- dat
+dat_p$pred <- "no"
+dat_p <- bind_rows(dat_p,p)
+```
+```{r}
+tree_red2 <- makeNodeLabel(tree_red) # standardize node labels
+Ainv <- inverseA(tree_red2)$Ainv # make inv of phy cov matrix
+```
+```{r}
+prior2<-list(G=list(G1=list(V=1,nu=0.002),
+                    G2=list(V=1,nu=0.002),
+                    G3=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+```
+```{r}
+# just mod with habitat
+mod8 <- MCMCglmm(E_comb ~ habitat_d1, 
+                 random = ~ binomial + tree_tips + idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat_p, prior = prior2,
+                 nitt=23000, thin = 50,
+                 ginverse = list(tree_tips=Ainv),
+                 family = "gaussian", pr=F, verbose = F)
+
+```
+
+```{r}
+# get predicted values
+pdx <- mod8$X # model matrix, just fixed effx
+l <- dim(pdx)[1] # number of data points in model
+pdx <- pdx[(length(dat$binomial)+1):l,] # restrict to only points where we want preds
+num_fe <- mod8$Fixed$nfl # number of fixed effx
+
+# predicted values via matrix multiplication, no taxonomic effx
+p_all <- as.matrix(pdx) %*% t(mod8$Sol[,1:num_fe])
+# add mean temp to preds, and the make it long
+p_all <- bind_cols(select(p, habitat_d1), data.frame(p_all))
+p_all <- p_all%>%
+  pivot_longer(cols = -habitat_d1,
+               names_to = "index", values_to = "pred")
+# calculate median fit and upper and lower fits for each value of temp
+p_all3 <- group_by(p_all, habitat_d1)%>%
+  summarise(fit = median(pred),
+            lwr = quantile(pred, probs = 0.025),
+            upr = quantile(pred, probs = 0.975))
+```
+
+```{r}
+tg4justhab <- ggplot(dat, 
+             aes(x = habitat_d1, y = E_comb)) +
+  # geom_boxplot() +
+  geom_crossbar(data = p_all3,
+                aes(x = habitat_d1, y = fit, ymin = lwr, ymax = upr),
+                alpha = 0.7, fill = 'lightgrey',
+                width = 0.3, fatten = 5) +
+  geom_point(aes(size = 1/se_comb),
+             position = position_jitter(width = 0.3),
+             alpha = 0.4) +
+  scale_y_continuous(breaks = seq(0, 1.5, 0.25)) +
+  labs(x = "Habitat type", y = "Activation energy") +
+  guides(size = F) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())  
+tg4justhab
+```
+
+Here is the estimated difference:
+
+```{r}
+p_all3%>%
+  select(habitat_d1, lwr, fit, upr)
+```
+
+It is pretty similar to when we control for environmental variables. We can also check this result's sensitivity to taxonomy.
+
+
+```{r}
+prior_notax<-list(G=list(G1=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+```
+```{r}
+# just mod with habitat
+mod8_notax <- MCMCglmm(E_comb ~ habitat_d1, 
+                 random = ~ idh(se_comb):units, 
+                 data = dat_p, prior = prior_notax,
+                 nitt=23000, thin = 50,
+                 ginverse = list(tree_tips=Ainv),
+                 family = "gaussian", pr=F, verbose = F)
+
+```
+
+```{r}
+# get predicted values
+pdx <- mod8_notax$X # model matrix, just fixed effx
+l <- dim(pdx)[1] # number of data points in model
+pdx <- pdx[(length(dat$binomial)+1):l,] # restrict to only points where we want preds
+num_fe <- mod8_notax$Fixed$nfl # number of fixed effx
+
+# predicted values via matrix multiplication, no taxonomic effx
+p_all <- as.matrix(pdx) %*% t(mod8_notax$Sol[,1:num_fe])
+# add mean temp to preds, and the make it long
+p_all <- bind_cols(select(p, habitat_d1), data.frame(p_all))
+p_all <- p_all%>%
+  pivot_longer(cols = -habitat_d1,
+               names_to = "index", values_to = "pred")
+# calculate median fit and upper and lower fits for each value of temp
+p_all3 <- group_by(p_all, habitat_d1)%>%
+  summarise(fit = median(pred),
+            lwr = quantile(pred, probs = 0.025),
+            upr = quantile(pred, probs = 0.975))
+```
+
+The error is much lower in non-phylogenetic models. It is overconfident.
+```{r}
+tg4notax <- ggplot(dat, 
+             aes(x = habitat_d1, y = E_comb)) +
+  # geom_boxplot() +
+  geom_crossbar(data = p_all3,
+                aes(x = habitat_d1, y = fit, ymin = lwr, ymax = upr),
+                alpha = 0.7, fill = 'lightgrey',
+                width = 0.3, fatten = 5) +
+  geom_point(aes(size = 1/se_comb),
+             position = position_jitter(width = 0.3),
+             alpha = 0.4) +
+  scale_y_continuous(breaks = seq(0, 1.5, 0.25)) +
+  labs(x = "Habitat type", y = "Activation energy") +
+  guides(size = F) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())  
+tg4notax
+```
+The difference is smaller, but the p-value is lower.
+```{r}
+p_all3%>%
+  select(habitat_d1, lwr, fit, upr)
+```
+```{r}
+summary(mod8_notax)
+```
+
+## Export
+Let's export each plot alone and the combined plots
+
+```{r}
+fig_w <- 4.5
+fig_h <- 4
+```
+```{r}
+ggsave(tg, filename = "../ms_figs/Fig3w.png", width = fig_w, height = fig_h, units = 'in')
+ggsave(tg2, filename = "../ms_figs/Fig3x.png", width = fig_w, height = fig_h, units = 'in')
+ggsave(tg3, filename = "../ms_figs/Fig3y.png", width = fig_w, height = fig_h, units = 'in')
+ggsave(tg4, filename = "../ms_figs/Fig3z.png", width = fig_w, height = fig_h, units = 'in')
+```
+
+Combine plots
+
+```{r}
+library(cowplot)
+```
+
+```{r}
+tg02 <- tg2 + 
+  theme(axis.title.y = element_blank(), 
+        axis.text.y = element_blank())
+
+tg04 <- tg4 + 
+  theme(axis.title.y = element_blank(), 
+        axis.text.y = element_blank())
+
+```
+
+```{r}
+f2_c <- plot_grid(tg + labs(y = "Activation energy (eV)"), tg02, 
+                  tg3 + labs(y = "Activation energy (eV)"), tg04,
+                  align="hv", nrow = 2, 
+                  labels = c('(a)', '(b)', '(c)', '(d)')) 
+```
+```{r}
+f2_c
+```
+
+
+```{r}
+ggsave(f2_c, filename = "../ms_figs/Fig3_comb.png",
+       width = fig_w*2, height = fig_h*2)
+ggsave(f2_c, filename = "../ms_figs/Fig3_comb.svg",
+       width = fig_w*2, height = fig_h*2)
+```
+
+

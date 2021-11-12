@@ -1,0 +1,159 @@
+---
+title: "Figure 3"
+output: html_document
+---
+
+This notebook creates Fig 3, which summarizes host-parasite char
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+library(MCMCglmm)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+options(stringsAsFactors = FALSE)
+theme_set(new = theme_bw())
+```
+```{r importdata}
+# focusing only on devo
+ae_devo <- read.csv(file = "../data/200421_ArrDevFits_filter.csv", header = TRUE)
+dat <- read.csv(file = "../data/main_data_rev.csv", header = TRUE)
+tree <- read.tree(file = "../data/full_tree_time_calib.nex")
+```
+```{r}
+dat <- select(dat, tpc_num, binomial = parasite_species, genus, fam = family, order, class, phylum, 
+              trait_type, num_temps = num_temps_in_curve, cause_of_repeated_measures, same_experiment,
+              measurement_metric, simplified_metric,
+              sampling_location_available,
+              mean_ann_temp, max_month_temp, min_month_temp,
+              latitude, altitude_m, author_latitude, dist_zone,
+              habitat,
+              plant_anim_parasite, endotherm_in_cycle, stage_in_out_host, target_host)
+```
+```{r}
+ae_devo <- rename(ae_devo, stderr_arr = SE_BA, stderr_ss = SE_SS)
+```
+```{r}
+dat <- left_join(dat, ae_devo, by = 'tpc_num') # join by temperature preference curve identifier
+dat <- filter(dat, !is.na(E_Arr)) # remove those without Act E
+```
+```{r}
+dat <- mutate(dat, E_comb = if_else(best_mod2 == "SS", E_SS, E_Arr),
+              se_comb = if_else(best_mod2 == "SS", stderr_ss, stderr_arr))
+dat <- mutate(dat, global = if_else(dist_zone == 'global', 'global', 'not global'))
+```
+```{r}
+dat <- filter(dat, !(same_experiment == "yes" & simplified_metric != 'mid'), !tpc_num %in% c(61)) # remove non-ind data
+```
+```{r}
+# fix it
+tree$tip.label[which(tree$tip.label == "Meloidogyne_hisanica")] <- "Meloidogyne_hispanica"
+```
+
+```{r}
+spp_not_in_dat <- tree$tip.label[!tree$tip.label %in% dat$binomial] # spp in tree excluded from data
+# spp_not_in_dat
+```
+```{r}
+tree_red <- drop.tip(tree, spp_not_in_dat)
+```
+```{r}
+dat$tree_tips <- dat$binomial
+```
+```{r}
+dat <- mutate(dat, mean_ann_temp_cen = mean_ann_temp - median(mean_ann_temp),
+              max_month_temp_cen = max_month_temp - median(max_month_temp),
+              min_month_temp_cen = min_month_temp - median(min_month_temp))
+```
+```{r}
+# make habitat variable easy to understand
+dat <- mutate(dat, habitat_d1 = if_else(habitat == 'terrestrial', 'Terrestrial',
+                                        if_else(habitat == 'freshwater' | habitat == 'marine', 'Aquatic', 'NA')))
+dat$habitat_d1[which(dat$habitat_d1 == "NA")] <- NA
+
+# sum(is.na(dat$habitat_d))
+```
+```{r}
+dat <- dat%>%mutate(endo_ecto2 = if_else(plant_anim_parasite == "plant", "plant", endotherm_in_cycle))
+```
+
+
+First, we'll make a plot for temperature. To put confidence/credible bands on the plot, we need to refit the model and then extract credible intervals.
+
+```{r}
+tree_red2 <- makeNodeLabel(tree_red) # standardize node labels
+Ainv <- inverseA(tree_red2)$Ainv # make inv of phy cov matrix
+```
+```{r}
+prior2<-list(G=list(G1=list(V=1,nu=0.002),
+                    G2=list(V=1,fix=1)), # btw observation variance due to measurement errror/SE of curve fit
+              R=list(V=1,nu=0.002)) # uninformative prior for within species effect
+```
+```{r}
+# just mod with temp
+mod1 <- MCMCglmm(E_comb ~ 1, 
+                 random = ~ tree_tips + idh(se_comb):units, # w/in spp + phylogenetic effx
+                 data = dat, prior = prior2,
+                 nitt=63000, thin = 50,
+                 ginverse = list(tree_tips=Ainv),
+                 family = "gaussian", pr=T, verbose = T)
+```
+
+
+```{r}
+# take RE for all tips and nodes in tree
+p_all <- apply(mod1$Sol,FUN = median, MARGIN = 2)
+p_all <- p_all[1] + p_all[which(grepl(pattern = "tree_tips", names(p_all)))] # add mean AE to RE to get pred values
+p_all <- data.frame(name = names(p_all), re = p_all)
+p_all <- mutate(p_all, name = gsub(name,pattern = "tree_tips.", replacement = ""))
+```
+
+Make phylogenetic figure
+
+```{r}
+library(ggtree)
+```
+
+```{r}
+dat_sp <- group_by(dat, tree_tips)%>%
+  summarize(ae = mean(E_comb))
+dat_sp <- full_join(dat_sp, p_all, by = c('tree_tips' = 'name'))
+dat_sp <- mutate(dat_sp, AE = if_else(!is.na(ae), ae, re),
+                 binomial = gsub(tree_tips, pattern = "_", replacement = " "))%>%
+  mutate(gen = paste0(substring(tree_tips,1,3), "."),
+         spp = substring(binomial, regexpr(" ", binomial), nchar(binomial)))%>%
+  mutate(binomial = paste0("    ", binomial, "    "),
+         gen_spp = paste0("    ", gen, " ", spp, "    "))
+```
+
+```{r}
+p <- ggtree(tree_red2, layout = 'circular') %<+% dat_sp
+p <- p +
+  geom_tiplab2(aes(label = gen_spp),
+               fontface = "italic",
+               size = 1.8
+               ) +
+  geom_nodepoint(aes(color = AE), shape = 19, size = 4) +
+  geom_tippoint(aes(color = AE), shape = 18, size = 3) +
+  scale_color_distiller(type = 'div', palette = 'RdBu') +
+  labs(color = "Activation energy") +
+  theme(legend.position = c(0.6, 0.4),
+        legend.justification = c(0.5,0.5),
+        legend.direction = "horizontal",
+        legend.background = element_rect(color = 'black'))
+p
+```
+
+Fix legend, remove root node
+```{r}
+fig_w <- 160
+fig_h <- 160
+```
+```{r}
+ggsave(p, filename = "../ms_figs/Fig2_phyX.png", width = fig_w, height = fig_h, units = 'mm')
+ggsave(p, filename = "../ms_figs/Fig2_phyX.svg", width = fig_w, height = fig_h, units = 'mm')
+ggsave(p, filename = "../ms_figs/Fig2_phyX.pdf", width = fig_w, height = fig_h, units = 'mm')
+```
+
+
